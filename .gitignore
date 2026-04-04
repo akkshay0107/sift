@@ -14,7 +14,7 @@ wheels/
 models/
 
 qdrant_storage/
-data/*
-scratch/*
+data/
+scratch/
 cookies.txt
 
