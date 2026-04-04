@@ -1,5 +1,4 @@
-from src.indexer.indexer import index_trusted_directory
-
+from src.indexer.indexer import index_monitored_directories
 
 if __name__ == "__main__":
-    index_trusted_directory()
+    index_monitored_directories()

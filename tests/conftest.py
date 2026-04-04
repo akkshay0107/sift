@@ -10,15 +10,15 @@ if str(project_root) not in sys.path:
 
 
 @pytest.fixture(scope="session")
-def trusted_dir():
+def monitored_dir():
     return project_root / "trusted"
 
 
 @pytest.fixture(scope="session")
-def sample_wav(trusted_dir):
-    return trusted_dir / "sample.wav"
+def sample_wav(monitored_dir):
+    return monitored_dir / "sample.wav"
 
 
 @pytest.fixture(scope="session")
-def test_png(trusted_dir):
-    return trusted_dir / "test.png"
+def test_png(monitored_dir):
+    return monitored_dir / "test.png"

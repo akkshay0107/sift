@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.indexer.config import TRUSTED_DIR
+from src.indexer.config import MONITORED_DIRECTORIES
 from src.indexer.file_router import get_pipelines_for_file
 from src.indexer.file_utils import compute_file_hash
 from src.indexer.pipelines import (
@@ -20,7 +20,6 @@ from src.indexer.qdrant_db import (
 )
 
 
-
 def index_file(path: Path) -> tuple[int, str]:
     current_content_hash = compute_file_hash(path)
     source_path = str(path)
@@ -30,7 +29,10 @@ def index_file(path: Path) -> tuple[int, str]:
     if existing_content_hash == current_content_hash:
         return 0, "skipped_unchanged"
 
-    if existing_content_hash is not None and existing_content_hash != current_content_hash:
+    if (
+        existing_content_hash is not None
+        and existing_content_hash != current_content_hash
+    ):
         deleted_count = delete_points_for_source_path(source_path)
         print(f"Reindexing {path}: deleted {deleted_count} old record(s)")
 
@@ -72,38 +74,41 @@ def index_file(path: Path) -> tuple[int, str]:
     return len(all_records), "indexed"
 
 
-def index_trusted_directory() -> None:
+def index_monitored_directories() -> None:
     ensure_collection()
-
-    if not TRUSTED_DIR.exists():
-        print(f"Trusted directory does not exist: {TRUSTED_DIR}")
-        return
 
     total_files = 0
     total_records = 0
     skipped_files = 0
 
-    for path in TRUSTED_DIR.rglob("*"):
-        if not path.is_file():
+    for directory in MONITORED_DIRECTORIES:
+        if not directory.exists():
+            print(f"Directory does not exist: {directory}")
             continue
 
-        total_files += 1
+        print(f"Indexing directory: {directory}")
 
-        try:
-            inserted, status = index_file(path)
+        for path in directory.rglob("*"):
+            if not path.is_file():
+                continue
 
-            if status == "skipped_unchanged":
-                skipped_files += 1
-                print(f"Skipped {path} -> unchanged")
-            else:
-                total_records += inserted
-                print(f"Indexed {path} -> {inserted} record(s)")
+            total_files += 1
 
-        except Exception as e:
-            print(f"Failed indexing {path}: {e}")
+            try:
+                inserted, status = index_file(path)
+
+                if status == "skipped_unchanged":
+                    skipped_files += 1
+                    print(f"Skipped {path} -> unchanged")
+                else:
+                    total_records += inserted
+                    print(f"Indexed {path} -> {inserted} record(s)")
+
+            except Exception as e:
+                print(f"Failed indexing {path}: {e}")
 
     print(
-        f"Done. Files scanned: {total_files}, "
+        f"Done. Total files scanned: {total_files}, "
         f"records inserted: {total_records}, "
         f"files skipped: {skipped_files}"
     )
