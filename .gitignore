@@ -13,6 +13,8 @@ wheels/
 # Local models
 models/
 
+.DS_Store
+
 qdrant_storage/
 data/
 scratch/

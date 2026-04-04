@@ -2,21 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from qdrant_client.models import Filter
 
 from src.indexer.config import QDRANT_COLLECTION
 from src.indexer.pipelines import get_qwen_embedder
 from src.indexer.qdrant_db import get_qdrant_client
-
-
-@dataclass(slots=True)
-class SearchResult:
-    id: str | int
-    score: float
-    payload: dict[str, Any] | None
-    vector: list[float] | dict[str, list[float]] | None = None
+from src.search.bundler import SearchBundle, SearchResult, build_bundles
 
 
 @dataclass(slots=True)
@@ -113,3 +105,34 @@ def search_similar_files(
         score_threshold=score_threshold,
     )
     return aggregate_file_results(embedding_results)[:k]
+
+
+def search_bundles(
+    prompt: str,
+    k: int = 5,
+    *,
+    collection_name: str = QDRANT_COLLECTION,
+    query_filter: Filter | None = None,
+    with_payload: bool = True,
+    score_threshold: float = 0.5,
+    bundling_limit: int = 15,
+) -> list[SearchBundle]:
+    # Fetch a larger pool of results to allow for both high-score seeds
+    # and lower-score items that can be merged into bundles.
+    # We don't apply the score_threshold here so we can get the 'others' for the pool.
+    embedding_results = search_similar(
+        prompt,
+        k=max(bundling_limit, k * 2),
+        collection_name=collection_name,
+        query_filter=query_filter,
+        with_payload=with_payload,
+        with_vectors=True,  # Required for embedding similarity
+        score_threshold=None,
+    )
+
+    # build_bundles will use score_threshold to identify seeds from the pool
+    bundles = build_bundles(
+        embedding_results, score_threshold=score_threshold, max_pool_size=bundling_limit
+    )
+
+    return bundles[:k]
