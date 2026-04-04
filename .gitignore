@@ -13,3 +13,6 @@ wheels/
 models/
 
 qdrant_storage/*
+
+# Local datasets
+data/

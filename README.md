@@ -1,10 +1,11 @@
 # Multimodal Memory Engine
 
-This repository hosts a local multimodal embedding engine leveraging huggingface's **Qwen3-VL-Embedding-2B** base model safely stripped of tracking frameworks and completely reliant on PyTorch execution. 
+This repository hosts a local multimodal embedding engine leveraging huggingface's **Qwen3-VL-Embedding-2B** base model safely stripped of tracking frameworks and completely reliant on PyTorch execution.
 
 Given an image and/or text string, it passes the input directly into the dense vision/text transformers and exports a unified 2048-dimensional float32 vector, enabling instant multimodal semantic retrieval comparisons.
 
 ## 1. Setup Environment
+
 Ensure you have `uv` installed, then add the necessary machine learning dependencies to your local package:
 
 ```bash
@@ -12,6 +13,7 @@ uv add "transformers>=4.57.0" "qwen-vl-utils>=0.0.14" "torch==2.8.0" pillow torc
 ```
 
 ## 2. Download the Model
+
 You will need to fetch the local copy (~5GB) of the Qwen parameters. Execute this directly using `uv run` to snapshot the payload straight into your local `models` directory:
 
 ```bash
@@ -19,7 +21,8 @@ uv run python -c "from huggingface_hub import snapshot_download; snapshot_downlo
 ```
 
 ## 3. Usage
-The Python entry interface (`src/embed/qwen.py`) natively wraps the model routing. 
+
+The Python entry interface (`src/embed/qwen.py`) natively wraps the model routing.
 
 ```python
 from src.embed.qwen import QwenEmbedder
@@ -30,23 +33,26 @@ embedder = QwenEmbedder()
 # 2a. Embed Text
 text_embedding = embedder.embed("A modern kitchen with wooden cabinets")
 
-# 2b. Embed an Image 
+# 2b. Embed an Image
 # Automatically maps inputs matching paths/URLs into visual encoding
 image_embedding = embedder.embed("tests/test.png")
 
-# 3. Calculate zero-copy L2 Similarity 
+# 3. Calculate zero-copy L2 Similarity
 score = (text_embedding @ image_embedding.T).item()
 print(f"Similarity Score: {score}")
 ```
 
 ### Local Testing
+
 The `tests/` directory uses automated pytest suites to strictly test tensor routing and shape dimensionality.
 Run the complete testing matrix:
+
 ```bash
 uv run pytest tests/
 ```
 
 ## 4. OCR Chaining
+
 You can instantly read raw text from complex images and route it directly into a semantic tensor via the `OCREmbeddingPipeline`.
 
 ```python
@@ -59,4 +65,44 @@ text, embedding = pipeline.process("tests/document.png", return_embedding=True)
 
 # Or simply extract the text without consuming heavy LLM resources
 text = pipeline.process("tests/document.png", return_embedding=False)
+```
+
+## AudioSetCaps subset setup
+
+This project uses a small local subset of AudioSetCaps instead of the full dataset for local validation.
+
+### Install dependencies
+
+```bash
+uv add pandas huggingface_hub yt-dlp
+```
+
+You also need `ffmpeg` installed on your system.
+
+### Prepare caption metadata
+
+```bash
+uv run src/embed/train/prepare_subset.py
+```
+
+This downloads only the caption CSV from HuggingFace and writes a small subset (100 rows) to:
+
+```text
+data/AudioSetCaps_caption_subset.csv
+```
+
+### Download audio samples
+
+```bash
+# Download the first 5 samples from the subset
+uv run src/embed/train/fetch_yt_sample.py --limit 5
+
+# Download a specific YouTube ID
+uv run src/embed/train/fetch_yt_sample.py --id "dQw4w9WgXcQ"
+```
+
+This picks samples from the subset CSV, downloads the corresponding YouTube clips, trims them, and converts them to 16kHz mono WAV files in:
+
+```text
+data/audio/
 ```
