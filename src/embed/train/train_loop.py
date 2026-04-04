@@ -207,7 +207,11 @@ def train():
             
             with torch.amp.autocast(device_type=amp_device, dtype=amp_dtype):
                 # Pass directly through our untended projection head
-                audio_embeds = proj_head(batch_clap.float())
+                raw_audio_embeds = proj_head(batch_clap.float())
+
+                # CRITICAL FIX: L2 Normalize to ensure true Cosine Similarity for InfoNCE
+                audio_embeds = F.normalize(raw_audio_embeds, p=2, dim=-1)
+                batch_text = F.normalize(batch_text, p=2, dim=-1)
 
                 # Contrastive Loss (InfoNCE)
                 scale = torch.clamp(logit_scale.exp(), max=100.0)
