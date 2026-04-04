@@ -51,7 +51,7 @@ We need to download the 5000 YouTube clips. Paste this massive block to automati
 cat << 'EOF' > prep.slurm
 #!/bin/bash
 #SBATCH --job-name=audio_prep
-#SBATCH --account=YOUR_ACCOUNT_HERE
+#SBATCH --account=mlp
 #SBATCH --partition=cpu
 #SBATCH --time=04:00:00
 #SBATCH --output=prep.out
