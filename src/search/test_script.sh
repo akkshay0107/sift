@@ -1,5 +1,6 @@
 uv run python - <<'PY'
-from src.search import search_similar, search_similar_files
+from src.search import search_similar
+from src.search.bundler import build_bundles
 
 queries = [
     "hi hello",
@@ -14,12 +15,16 @@ queries = [
 
 for q in queries:
     print(f"\nQUERY: {q}")
-    print("FILES:")
-    for r in search_similar_files(q, k=5):
-        print(f"  {r.score:.4f}  {r.file_name}")
+
+    results = search_similar(
+        q,
+        k=20,
+        with_payload=True,
+        with_vectors=True,
+    )
 
     print("RAW POINTS:")
-    for r in search_similar(q, k=8):
+    for r in results:
         payload = r.payload or {}
         print(
             f"  {r.score:.4f}  {payload.get('file_name')}  "
@@ -27,4 +32,22 @@ for q in queries:
             f"family={payload.get('embedding_family')}  "
             f"pipeline={payload.get('pipeline_name')}"
         )
+
+    bundles = build_bundles(
+        results,
+        score_threshold=0.45,
+        grouping_threshold=0.60,
+        max_pool_size=20,
+    )
+
+    print("BUNDLES:")
+    for b in bundles:
+        print(f"  bundle={b.title} score={b.score:.4f} files={len(b.source_files)} views={len(b.views)}")
+        for v in b.views[:5]:
+            payload = v.payload or {}
+            print(
+                f"    - {v.score:.4f} {payload.get('file_name')} "
+                f"modality={payload.get('modality')} "
+                f"family={payload.get('embedding_family')}"
+            )
 PY
