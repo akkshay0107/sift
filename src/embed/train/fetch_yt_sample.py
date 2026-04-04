@@ -1,5 +1,6 @@
 import argparse
 import os
+import random
 import subprocess
 import time
 from pathlib import Path
@@ -76,6 +77,9 @@ def batch_fetch(csv_path, audio_dir, limit=None, skip_existing=True, browser=Non
     total = len(df)
     start_time = time.time()
     stats = {"success": 0, "fail": 0, "skip": 0}
+    
+    # Randomize the first sleep trigger between 10 and 20
+    next_sleep_at = random.randint(10, 20)
 
     for i, (_, row) in enumerate(df.iterrows(), start=1):
         # Force the ID into a string to avoid weird edge cases
@@ -112,6 +116,13 @@ def batch_fetch(csv_path, audio_dir, limit=None, skip_existing=True, browser=Non
             print(f"\n--- Progress: {i}/{total} ({(i/total)*100:.1f}%) "
                   f"| Elapsed: {int(elapsed)}s | ETA: {time_str} ---")
             print(f"--- Stats: {stats['success']} Success | {stats['skip']} Skipped | {stats['fail']} Failed ---\n")
+
+        # Sleep logic: Randomized break every ~10-20 downloads
+        if i == next_sleep_at and i < total:
+            sleep_dur = random.uniform(5, 12)
+            print(f"--- Anti-Throttling: Taking a {sleep_dur:.1f}s breather... ---\n")
+            time.sleep(sleep_dur)
+            next_sleep_at += random.randint(10, 20)
 
 
 if __name__ == "__main__":
