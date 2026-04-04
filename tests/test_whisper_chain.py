@@ -1,12 +1,6 @@
-import sys
-from pathlib import Path
-
 import pytest
 import torch
 from faster_whisper import decode_audio
-
-# Ensure project root is in path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.embed.audio import AudioSegment
 from src.embed.qwen import QwenEmbedder
@@ -22,15 +16,12 @@ def whisper_chain():
     return WhisperChain(transcriber, qwen_embedder)
 
 
-def test_whisper_chain_embedding(whisper_chain):
+def test_whisper_chain_embedding(whisper_chain, sample_wav):
     """Verifies that Audio -> Whisper -> Qwen pipeline works and produces correct shapes."""
-    test_dir = Path(__file__).parent
-    audio_path = test_dir / "sample.wav"
+    if not sample_wav.exists():
+        pytest.skip(f"Test audio file not found at {sample_wav}")
 
-    if not audio_path.exists():
-        pytest.skip(f"Test audio file not found at {audio_path}")
-
-    audio_data = decode_audio(str(audio_path), sampling_rate=16000)
+    audio_data = decode_audio(str(sample_wav), sampling_rate=16000)
 
     # Create an AudioSegment
     segment = AudioSegment(
@@ -53,15 +44,12 @@ def test_whisper_chain_embedding(whisper_chain):
     assert torch.equal(embedding, segment.text_embedding)
 
 
-def test_whisper_chain_batch(whisper_chain):
+def test_whisper_chain_batch(whisper_chain, sample_wav):
     """Verifies batch processing in WhisperChain."""
-    test_dir = Path(__file__).parent
-    audio_path = test_dir / "sample.wav"
+    if not sample_wav.exists():
+        pytest.skip(f"Test audio file not found at {sample_wav}")
 
-    if not audio_path.exists():
-        pytest.skip(f"Test audio file not found at {audio_path}")
-
-    audio_data = decode_audio(str(audio_path), sampling_rate=16000)
+    audio_data = decode_audio(str(sample_wav), sampling_rate=16000)
 
     # Create two identical segments for testing batching
     segment1 = AudioSegment(
