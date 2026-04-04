@@ -13,7 +13,7 @@ wheels/
 # Local models
 models/
 
-qdrant_storage/*
+qdrant_storage/
 data/*
 scratch/*
 cookies.txt
