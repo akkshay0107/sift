@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache
 
 # Virtual environments
 .venv
@@ -16,3 +17,4 @@ qdrant_storage/*
 data/*
 scratch/*
 cookies.txt
+

@@ -8,9 +8,6 @@ import torch
 from src.embed.audio import AudioEmbedder
 
 
-SAMPLE_WAV = Path(__file__).parent / "sample.wav"
-
-
 def _load_wav(path: Path) -> tuple[np.ndarray, int]:
     with wave.open(str(path), "rb") as f:
         sample_rate = f.getframerate()
@@ -20,7 +17,9 @@ def _load_wav(path: Path) -> tuple[np.ndarray, int]:
         raw = f.readframes(n_frames)
 
     dtype_map = {1: np.int8, 2: np.int16, 4: np.int32}
-    samples = np.frombuffer(raw, dtype=dtype_map.get(sampwidth, np.int16)).astype(np.float32)
+    samples = np.frombuffer(raw, dtype=dtype_map.get(sampwidth, np.int16)).astype(
+        np.float32
+    )
     samples /= float(2 ** (8 * sampwidth - 1))
 
     if n_channels > 1:
@@ -35,10 +34,10 @@ def audio_embedder():
 
 
 @pytest.fixture(scope="module")
-def sample_audio():
-    if not SAMPLE_WAV.exists():
-        pytest.skip(f"sample.wav not found at {SAMPLE_WAV}")
-    return _load_wav(SAMPLE_WAV)
+def sample_audio(sample_wav):
+    if not sample_wav.exists():
+        pytest.skip(f"sample.wav not found at {sample_wav}")
+    return _load_wav(sample_wav)
 
 
 def test_audio_embedding_shape(audio_embedder, sample_audio):
@@ -73,7 +72,9 @@ def test_audio_embedding_on_cpu(audio_embedder, sample_audio):
 
 def test_embed_batch_shape(audio_embedder, sample_audio):
     waveform, sample_rate = sample_audio
-    embs = audio_embedder.embed_batch([(waveform, sample_rate), (waveform, sample_rate)])
+    embs = audio_embedder.embed_batch(
+        [(waveform, sample_rate), (waveform, sample_rate)]
+    )
 
     print(f"\nBatch shape: {embs.shape}")
 
