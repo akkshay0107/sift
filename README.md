@@ -40,6 +40,23 @@ print(f"Similarity Score: {score}")
 ```
 
 ### Local Testing
-Two scripts exist in the `tests/` directory to instantly verify your model works:
-1. **Text**: `uv run python tests/test_text_embedding.py`
-2. **Image**: `uv run python tests/test_image_embedding.py` *(requires dropping an image into `tests/`)*
+The `tests/` directory uses automated pytest suites to strictly test tensor routing and shape dimensionality.
+Run the complete testing matrix:
+```bash
+uv run pytest tests/
+```
+
+## 4. OCR Chaining
+You can instantly read raw text from complex images and route it directly into a semantic tensor via the `OCREmbeddingPipeline`.
+
+```python
+from src.embed.ocr_chain import OCREmbeddingPipeline
+
+pipeline = OCREmbeddingPipeline()
+
+# Get the concatenated OCR text AND the encoded 2048-dim vector
+text, embedding = pipeline.process("tests/document.png", return_embedding=True)
+
+# Or simply extract the text without consuming heavy LLM resources
+text = pipeline.process("tests/document.png", return_embedding=False)
+```
