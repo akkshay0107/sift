@@ -81,29 +81,39 @@ You can watch it run with `squeue -u sriram54`. Once it disappears from the queu
 
 ### Step 4: Create and Run the "Train Ticket" (Run on Gautschi)
 If Step 3 went smoothly, it's time to leverage the massive H100 GPUs. 
-Paste this block into Gautschi to create `train.slurm` and launch the final training loop.
+
+*Note: Since we added **L2 Normalization** for true Cosine Similarity and converted your script to use **RAM Caching for the Base Models**, this 50-epoch loop process will now compute natively at thousands of iterations-per-second while maximizing your H100 memory!*
+
+Paste this block into Gautschi to create `train.slurm` and launch the absolutely optimized training loop.
 
 ```bash
 cat << 'EOF' > train.slurm
 #!/bin/bash
 #SBATCH --job-name=engine_train
-#SBATCH --account=YOUR_ACCOUNT_HERE
+#SBATCH --account=mlp
 #SBATCH --partition=ai
 #SBATCH --gpus-per-node=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=14
 #SBATCH --time=12:00:00
 #SBATCH --output=train.out
 
 cd $SLURM_SUBMIT_DIR
 module load python/3.11.9
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+export PATH="$HOME/bin:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
 # Setup Hyperparameters and bypass HF Home quota
-export BATCH_SIZE=128
-export EPOCHS=50
 export HF_HOME="$RCAC_SCRATCH/huggingface_cache"
+export PYTHONUNBUFFERED=1
 
-# Train the model
+# CRANK BATCH SIZE TO MAXIMIZE NEGATIVE SAMPLES ON THE H100
+export BATCH_SIZE=2048
+export EPOCHS=50
+
+# Wipe old non-normalized checkpoints to ensure a fresh, perfect run
+echo "Wiping old checkpoints..."
+rm -rf "$RCAC_SCRATCH/engine/checkpoints/"*
+
+# Train the model (Precompute first, then FAST loop!)
 uv run python -m src.embed.train.train_loop
 EOF
 
