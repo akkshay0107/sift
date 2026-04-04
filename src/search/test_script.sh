@@ -8,8 +8,8 @@ queries = [
     "superman",
     "4 dice",
     "dancing masquerade",
-    # "batman",
-    # "board game",
+    "princess",
+    "jester",
 ]
 
 for q in queries:
