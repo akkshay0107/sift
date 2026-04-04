@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 import torch
-from src.pipeline import OCREmbeddingPipeline
+from src.embed.ocr_chain import OCREmbeddingPipeline
 
 @pytest.fixture(scope="module")
 def pipeline():
