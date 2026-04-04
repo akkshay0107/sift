@@ -152,11 +152,25 @@ class QwenEmbedder:
         if isinstance(input, Image.Image):
             item["image"] = input
         elif isinstance(input, str):
-            # Treat as image if it looks like a path/URL, otherwise as text.
             is_url = input.startswith(("http://", "https://", "oss://"))
             is_path = not is_url and os.path.exists(input)
-            if is_url or is_path:
-                item["image"] = input
+
+            if is_path:
+                suffix = Path(input).suffix.lower()
+                video_exts = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+
+                if suffix in video_exts:
+                    item["video"] = input
+                else:
+                    item["image"] = input
+            elif is_url:
+                lower = input.lower()
+                video_exts = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v")
+
+                if lower.endswith(video_exts):
+                    item["video"] = input
+                else:
+                    item["image"] = input
             else:
                 item["text"] = input
         else:

@@ -10,6 +10,7 @@ from src.indexer.pipelines import (
     build_ocr_text_record,
     build_text_record,
     build_transcript_text_record,
+    build_video_record,
 )
 from src.indexer.qdrant_db import (
     delete_points_for_source_path,
@@ -17,6 +18,7 @@ from src.indexer.qdrant_db import (
     get_existing_content_hash_for_source_path,
     upsert_records,
 )
+
 
 
 def index_file(path: Path) -> tuple[int, str]:
@@ -58,6 +60,10 @@ def index_file(path: Path) -> tuple[int, str]:
             all_records.extend(transcript_records)
             if transcript_records:
                 metadata_modality = "transcript_text"
+        elif pipeline_name == "video":
+            all_records.extend(build_video_record(path))
+            if metadata_modality is None:
+                metadata_modality = "video"
 
     if pipeline_names and metadata_modality is not None:
         all_records.extend(build_metadata_record(path, modality=metadata_modality))
