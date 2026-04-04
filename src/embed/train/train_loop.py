@@ -1,4 +1,5 @@
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -13,48 +14,58 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from src.embed.audio import AudioEmbedder
 from src.embed.qwen import QwenEmbedder
 
-CSV_PATH = "data/AudioSetCaps_caption_subset.csv"
-AUDIO_DIR = "data/audio"
-CHECKPOINT_DIR = "data/checkpoints"
-BATCH_SIZE = 4  # Start small; on H100, increase dramatically to 128/256
-EPOCHS = 10
-LR = 1e-4
-WEIGHT_DECAY = 0.2
+scratch_base = os.environ.get("RCAC_SCRATCH", "./scratch")
+CSV_PATH = os.environ.get("CSV_PATH", str(Path(scratch_base) / "engine" / "data" / "AudioSetCaps_caption_subset.csv"))
+AUDIO_DIR = os.environ.get("AUDIO_DIR", str(Path(scratch_base) / "engine" / "audio"))
+CHECKPOINT_DIR = os.environ.get("CHECKPOINT_DIR", str(Path(scratch_base) / "engine" / "checkpoints"))
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 128))
+EPOCHS = int(os.environ.get("EPOCHS", 50))
+LR = float(os.environ.get("LR", 1e-4))
+WEIGHT_DECAY = float(os.environ.get("WEIGHT_DECAY", 0.2))
 
 
 class AudioTextDataset(Dataset):
     def __init__(self, csv_file: str, audio_dir: str):
+        print(f"Loading CSV from: {csv_file}")
         self.df = pd.read_csv(csv_file)
         self.audio_dir = Path(audio_dir)
+        
+        print("Verifying audio files exist to prevent missing samples...")
+        valid_rows = []
+        for idx, row in self.df.iterrows():
+            yt_id = str(row.get("id", str(row.name)))
+            if yt_id.startswith("Y"):
+                yt_id = yt_id[1:]
+            
+            audio_path = self.audio_dir / f"{yt_id}.wav"
+            if audio_path.exists():
+                valid_rows.append(idx)
+        
+        original_len = len(self.df)
+        self.df = self.df.loc[valid_rows].reset_index(drop=True)
+        print(f"Retained {len(self.df)} valid pairs from {original_len} total rows.")
 
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
-        yt_id = row.get("id", str(row.name))
-
-        # AudioSet dataset specific formatting handling
-        if isinstance(yt_id, str) and yt_id.startswith("Y"):
+        yt_id = str(row.get("id"))
+        if yt_id.startswith("Y"):
             yt_id = yt_id[1:]
 
         audio_path = self.audio_dir / f"{yt_id}.wav"
-
-        # TODO: fix this, it shouldn't ever reach this scenario
-        # where we have a missing audio file. Happens because some of the youtube
-        # links are no longer valid. Maybe create a new file that filters out the
-        # dataframe even further to only store valid pairs of (audio_file, caption)
-        # Then that would reduce the complexity of this data loader.
-        #
-        # Load audio (fallback to silence if missing to keep batching intact)
-        if audio_path.exists():
-            # Use fixed sr and mono for speed
+        
+        try:
+            # 48kHz mono loading
             audio_array, _ = librosa.load(audio_path, sr=48000, mono=True)
-        else:
+        except Exception as e:
+            print(f"Warning: Failed to load {audio_path}: {e}")
             audio_array = np.zeros(48000, dtype=np.float32)
 
         return audio_array, str(row["caption"])
@@ -64,23 +75,31 @@ def collate_fn(batch):
     audios, texts = zip(*batch)
     return list(audios), list(texts)
 
-# TODO: add a way to store / display logs of the training
-# loop as it is running. Will help if we need to stop early
+
 def train():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+        
+    print(f"Using compute device: {device}")
 
     Path(CHECKPOINT_DIR).mkdir(parents=True, exist_ok=True)
+    print(f"Checkpoints will be managed in: {CHECKPOINT_DIR}")
 
-    print("Loading Base Models...")
-    qwen = QwenEmbedder(dtype=torch.bfloat16)  # Generates text targets
-    aligner = AudioEmbedder(device=device, dtype=torch.bfloat16)
+    print("Initializing Base Models...")
+    
+    # Safe float fallback for CPU/MPS locally, bfloat16 for CUDA
+    dtype = torch.float32 if device.type in ["cpu", "mps"] else torch.bfloat16
+        
+    qwen = QwenEmbedder(dtype=dtype)  
+    aligner = AudioEmbedder(device=device, dtype=dtype)
 
-    # Extract and Isolate the Trainable Projection Head
     proj_head = aligner.projection_head()
     proj_head.train()
 
-    # Learnable contrastive temperature scalar
     logit_scale = nn.Parameter(torch.tensor(math.log(1 / 0.07), device=device))
 
     optimizer = torch.optim.AdamW(
@@ -90,10 +109,34 @@ def train():
     )
 
     scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS)
+    
+    # ======= RESUME SUPPORT =======
+    start_epoch = 0
+    latest_path = Path(CHECKPOINT_DIR) / "latest.pt"
+    
+    resume_file = os.environ.get("RESUME_PATH", str(latest_path))
+    if Path(resume_file).exists():
+        print(f"Loading checkpoint parameters from: {resume_file}")
+        # weights_only=False because optimizer states contain objects
+        checkpoint = torch.load(resume_file, map_location=device, weights_only=False)
+        proj_head.load_state_dict(checkpoint["proj_head_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        logit_scale.data = checkpoint["logit_scale"].to(device)
+        start_epoch = checkpoint["epoch"] + 1
+        print(f"Successfully resumed at epoch {start_epoch}")
+    else:
+        print("No prior checkpoint found. Beginning new training run.")
 
     # Data Supply
-    num_workers = 4 if torch.cuda.is_available() else 0
+    num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 4 if torch.cuda.is_available() else 0))
+    print(f"Configuring Dataloader with {num_workers} parallel workers.")
     dataset = AudioTextDataset(CSV_PATH, AUDIO_DIR)
+    
+    if len(dataset) == 0:
+        print("CRITICAL: No valid dataset found to train on. Check directories. Exiting.")
+        return
+
     loader = DataLoader(
         dataset,
         batch_size=BATCH_SIZE,
@@ -104,40 +147,39 @@ def train():
         persistent_workers=(num_workers > 0),
     )
 
-    print(f"Starting Training! Batches per epoch: {len(loader)}")
+    print(f"Starting Training Loop! Batches per epoch: {len(loader)}, Total samples: {len(dataset)}")
 
-    for epoch in range(EPOCHS):
+    for epoch in range(start_epoch, EPOCHS):
         epoch_loss = 0.0
         current_lr = optimizer.param_groups[0]["lr"]
-
-        for audios, texts in loader:
-            optimizer.zero_grad(set_to_none=True)  # Slightly faster than zero_grad()
+        
+        pbar = tqdm(loader, desc=f"Epoch {epoch + 1}/{EPOCHS}")
+        for audios, texts in pbar:
+            optimizer.zero_grad(set_to_none=True)
 
             with torch.no_grad():
-                # Text Targets
-                text_embeds = qwen.embed_batch(texts).to(device, dtype=torch.bfloat16)
+                text_embeds = qwen.embed_batch(texts).to(device, dtype=dtype)
 
-                # Audio Encoding via CLAP
                 inputs = aligner._processor(
                     audio=audios,
-                    sampling_rate=aligner.CLAP_SAMPLE_RATE,
+                    sampling_rate=aligner.CLAP_SAMPLE_RATE, # 48000
                     return_tensors="pt",
                     padding=True,
                 )
-                input_features = inputs["input_features"].to(
-                    device, dtype=torch.bfloat16
-                )
+                input_features = inputs["input_features"].to(device, dtype=dtype)
 
                 audio_outputs = aligner._audio_model(input_features=input_features)
                 clap_embed = aligner._audio_projection(audio_outputs.pooler_output)
                 clap_embed = F.normalize(clap_embed, p=2, dim=-1)
 
-            # Cast using AMP
-            device_type_str = "cuda" if device.type == "cuda" else "cpu"
-            with torch.amp.autocast(device_type=device_type_str, dtype=torch.bfloat16):
+            # Conditional AMP
+            amp_device = device.type
+            amp_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            
+            with torch.amp.autocast(device_type=amp_device, dtype=amp_dtype):
                 audio_embeds = proj_head(clap_embed.float())
 
-                # Contrastive (Symmetric InfoNCE) Loss
+                # Contrastive Loss (InfoNCE)
                 scale = torch.clamp(logit_scale.exp(), max=100.0)
                 logits_per_audio = scale * audio_embeds @ text_embeds.t()
                 logits_per_text = logits_per_audio.t()
@@ -151,18 +193,30 @@ def train():
             optimizer.step()
 
             epoch_loss += loss.item()
+            pbar.set_postfix(loss=f"{loss.item():.4f}", temp=f"{scale.item():.2f}")
 
         avg_loss = epoch_loss / len(loader)
-        print(
-            f"Epoch {epoch + 1}/{EPOCHS} - loss: {avg_loss:.4f} - lr: {current_lr:.2e} - temp: {scale.item():.2f}"
-        )
+        print(f"\n==== Epoch {epoch + 1} Summary ====")
+        print(f"Avg Loss: {avg_loss:.4f} | LR: {current_lr:.2e} | Temp: {scale.item():.2f}")
 
         scheduler.step()
 
-        ckpt_path = Path(CHECKPOINT_DIR) / f"proj_head_ep{epoch + 1}.pt"
-        torch.save(proj_head.state_dict(), ckpt_path)
-        print(f"-> Saved Checkpoint to {ckpt_path}")
-
+        # ======= FULL STATE CHECKPOINT =======
+        checkpoint = {
+            "epoch": epoch,
+            "proj_head_state_dict": proj_head.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "logit_scale": logit_scale.data,
+        }
+        
+        ckpt_path = Path(CHECKPOINT_DIR) / f"checkpoint_epoch_{epoch + 1:03d}.pt"
+        latest_path = Path(CHECKPOINT_DIR) / "latest.pt"
+        
+        torch.save(checkpoint, ckpt_path)
+        torch.save(checkpoint, latest_path)
+        
+        print(f"-> Saved robust Checkpoints to {CHECKPOINT_DIR}\n")
 
 if __name__ == "__main__":
     train()
