@@ -163,7 +163,7 @@ def train():
                 return_tensors="pt",
                 padding=True,
             )
-            input_features = inputs["input_features"].to(device, dtype=cache_dtype)
+            input_features = inputs["input_features"].to(device, dtype=aligner.dtype)
 
             audio_outputs = aligner._audio_model(input_features=input_features)
             clap_emb = aligner._audio_projection(audio_outputs.pooler_output)
@@ -203,15 +203,21 @@ def train():
 
             # Conditional AMP
             amp_device = device.type
-            amp_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            if torch.cuda.is_available():
+                amp_dtype = torch.bfloat16
+            elif torch.backends.mps.is_available():
+                amp_dtype = torch.float16
+            else:
+                amp_dtype = torch.bfloat16
             
             with torch.amp.autocast(device_type=amp_device, dtype=amp_dtype):
                 # Pass directly through our untended projection head
                 raw_audio_embeds = proj_head(batch_clap.float())
 
-                # CRITICAL FIX: L2 Normalize to ensure true Cosine Similarity for InfoNCE
-                audio_embeds = F.normalize(raw_audio_embeds, p=2, dim=-1)
-                batch_text = F.normalize(batch_text, p=2, dim=-1)
+                # CRITICAL FIX: L2 Normalize and safely cast to float32 to ensure true Cosine Similarity for InfoNCE
+                # This guarantees stability on Mac/CPU where AMP doesn't always automatically align to float32.
+                audio_embeds = F.normalize(raw_audio_embeds, p=2, dim=-1).float()
+                batch_text = F.normalize(batch_text, p=2, dim=-1).float()
 
                 # Contrastive Loss (InfoNCE)
                 scale = torch.clamp(logit_scale.exp(), max=100.0)
