@@ -78,8 +78,11 @@ def load_audio_file(path: Path) -> tuple[np.ndarray, int]:
 
 def make_base_kwargs(path: Path) -> dict:
     content_hash = compute_file_hash(path)
-    ts = now_iso()
+    stat = path.stat()
     source_file_id = source_file_id_for(path, content_hash)
+
+    created_at = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).isoformat()
+    updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
 
     return {
         "source_file_id": source_file_id,
@@ -88,9 +91,47 @@ def make_base_kwargs(path: Path) -> dict:
         "extension": file_extension(path),
         "mime_type": guess_mime_type(path),
         "content_hash": content_hash,
-        "created_at": ts,
-        "updated_at": ts,
+        "created_at": created_at,
+        "updated_at": updated_at,
     }
+
+
+def build_metadata_text(path: Path, base: dict, modality: str) -> str:
+    return "\n".join(
+        [
+            f"filename: {path.stem}",
+            f"extension: {base['extension']}",
+            f"modality: {modality}",
+            f"embedding family: metadata",
+            f"created at: {base['created_at']}",
+            f"updated at: {base['updated_at']}",
+        ]
+    )
+
+
+def build_metadata_record(path: Path, modality: str) -> list[EmbeddingRecord]:
+    base = make_base_kwargs(path)
+    source_file_id = base["source_file_id"]
+
+    metadata_text = build_metadata_text(path, base, modality)
+    embedder = get_qwen_embedder()
+    tensor = embedder.embed(metadata_text)
+    vector = tensor.squeeze(0).tolist()
+
+    return [
+        EmbeddingRecord(
+            id=new_id(),
+            vector=vector,
+            modality=modality,
+            pipeline_name="qwen_metadata_text",
+            chunk_id=f"{source_file_id}:metadata:0",
+            chunk_index=0,
+            embedding_family="metadata",
+            extracted_text=metadata_text,
+            metadata={"is_metadata_embedding": True},
+            **base,
+        )
+    ]
 
 
 def build_text_record(path: Path) -> list[EmbeddingRecord]:
