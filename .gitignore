@@ -13,3 +13,4 @@ wheels/
 models/
 
 qdrant_storage/*
+data/*
