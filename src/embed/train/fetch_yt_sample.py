@@ -5,6 +5,9 @@ from pathlib import Path
 import pandas as pd
 
 
+# TODO: find a way to associate your account with yt-dlp
+# a lot of the request start getting denied if you don't
+# which would lead to no audio clip gettind downloaded.
 def fetch_audio(youtube_id, start_sec, duration, out_file, skip_existing=True):
     """
     Downloads and trims audio from a YouTube video.
