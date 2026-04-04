@@ -284,3 +284,26 @@ def build_transcript_text_record(path: Path) -> list[EmbeddingRecord]:
             **base,
         )
     ]
+
+def build_video_record(path: Path) -> list[EmbeddingRecord]:
+    embedder = get_qwen_embedder()
+    tensor = embedder.embed(str(path))
+    vector = tensor.squeeze(0).tolist()
+
+    base = make_base_kwargs(path)
+    source_file_id = base["source_file_id"]
+
+    return [
+        EmbeddingRecord(
+            id=new_id(),
+            vector=vector,
+            modality="video",
+            pipeline_name="qwen_video",
+            chunk_id=f"{source_file_id}:video:0",
+            chunk_index=0,
+            embedding_family="primary_video",
+            extracted_text=None,
+            metadata={},
+            **base,
+        )
+    ]
