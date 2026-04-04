@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 from tqdm import tqdm
 
 from src.embed.audio import AudioEmbedder
@@ -137,51 +137,81 @@ def train():
         print("CRITICAL: No valid dataset found to train on. Check directories. Exiting.")
         return
 
-    loader = DataLoader(
+    from torch.utils.data import TensorDataset
+
+    print("Precomputing Base Embeddings (This runs exactly ONCE)...")
+    pre_loader = DataLoader(
         dataset,
         batch_size=BATCH_SIZE,
-        shuffle=True,
+        shuffle=False,
         collate_fn=collate_fn,
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
-        persistent_workers=(num_workers > 0),
     )
+    
+    all_text_embeds = []
+    all_clap_embeds = []
 
-    print(f"Starting Training Loop! Batches per epoch: {len(loader)}, Total samples: {len(dataset)}")
+    for audios, texts in tqdm(pre_loader, desc="Precomputing Base Models"):
+        with torch.no_grad():
+            text_emb = qwen.embed_batch(texts).to(device, dtype=dtype)
+
+            inputs = aligner._processor(
+                audio=audios,
+                sampling_rate=aligner.CLAP_SAMPLE_RATE, # 48000
+                return_tensors="pt",
+                padding=True,
+            )
+            input_features = inputs["input_features"].to(device, dtype=dtype)
+
+            audio_outputs = aligner._audio_model(input_features=input_features)
+            clap_emb = aligner._audio_projection(audio_outputs.pooler_output)
+            clap_emb = F.normalize(clap_emb, p=2, dim=-1)
+
+            # Move to CPU RAM temporarily to save precious GPU VRAM
+            all_text_embeds.append(text_emb.cpu())
+            all_clap_embeds.append(clap_emb.cpu())
+            
+    tensor_text = torch.cat(all_text_embeds, dim=0)
+    tensor_clap = torch.cat(all_clap_embeds, dim=0)
+    
+    # Memory Cleanup: Free the massive models before the training loop
+    del qwen
+    del aligner._audio_model
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    fast_dataset = TensorDataset(tensor_clap, tensor_text)
+    fast_loader = DataLoader(fast_dataset, batch_size=BATCH_SIZE, shuffle=True)
+
+    print(f"Precomputed Shapes - Audio: {tensor_clap.shape}, Text: {tensor_text.shape}")
+    print(f"Starting FAST Training Loop! Batches per epoch: {len(fast_loader)}")
 
     for epoch in range(start_epoch, EPOCHS):
         epoch_loss = 0.0
         current_lr = optimizer.param_groups[0]["lr"]
         
-        pbar = tqdm(loader, desc=f"Epoch {epoch + 1}/{EPOCHS}")
-        for audios, texts in pbar:
+        pbar = tqdm(fast_loader, desc=f"Epoch {epoch + 1}/{EPOCHS}")
+        for batch_clap, batch_text in pbar:
+            # Move precomputed batch directly to GPU
+            batch_clap = batch_clap.to(device, dtype=dtype)
+            batch_text = batch_text.to(device, dtype=dtype)
+            
             optimizer.zero_grad(set_to_none=True)
-
-            with torch.no_grad():
-                text_embeds = qwen.embed_batch(texts).to(device, dtype=dtype)
-
-                inputs = aligner._processor(
-                    audio=audios,
-                    sampling_rate=aligner.CLAP_SAMPLE_RATE, # 48000
-                    return_tensors="pt",
-                    padding=True,
-                )
-                input_features = inputs["input_features"].to(device, dtype=dtype)
-
-                audio_outputs = aligner._audio_model(input_features=input_features)
-                clap_embed = aligner._audio_projection(audio_outputs.pooler_output)
-                clap_embed = F.normalize(clap_embed, p=2, dim=-1)
 
             # Conditional AMP
             amp_device = device.type
             amp_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
             
             with torch.amp.autocast(device_type=amp_device, dtype=amp_dtype):
-                audio_embeds = proj_head(clap_embed.float())
+                # Pass directly through our untended projection head
+                audio_embeds = proj_head(batch_clap.float())
 
                 # Contrastive Loss (InfoNCE)
                 scale = torch.clamp(logit_scale.exp(), max=100.0)
-                logits_per_audio = scale * audio_embeds @ text_embeds.t()
+                logits_per_audio = scale * audio_embeds @ batch_text.t()
                 logits_per_text = logits_per_audio.t()
 
                 labels = torch.arange(len(audio_embeds), device=device)
@@ -195,7 +225,7 @@ def train():
             epoch_loss += loss.item()
             pbar.set_postfix(loss=f"{loss.item():.4f}", temp=f"{scale.item():.2f}")
 
-        avg_loss = epoch_loss / len(loader)
+        avg_loss = epoch_loss / len(fast_loader)
         print(f"\n==== Epoch {epoch + 1} Summary ====")
         print(f"Avg Loss: {avg_loss:.4f} | LR: {current_lr:.2e} | Temp: {scale.item():.2f}")
 
