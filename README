@@ -1,0 +1,310 @@
+# Multimodal Memory Engine (MME)
+
+A high-performance local embedding and retrieval engine designed for instant multimodal semantic search across Text, Images, Audio, and Video. Built to operate as a "Memory Engine" with zero-friction access to your personal or project data.
+
+---
+
+## 🚀 Key Features
+
+- **Unified Embedding Space**: Maps Text, Images, Audio, and Video into a shared 2048-dimensional vector space.
+- **Qwen3-VL Backbone**: Leverages the state-of-the-art **Qwen3-VL-Embedding-2B** for native vision and text understanding.
+- **Audio-to-Multimodal Alignment**: Bridges the gap between Audio (CLAP) and Text/Vision (Qwen) via a learned Projection Head trained on AudioSetCaps.
+- **OCR & Transcript Chains**: 
+    - **OCR**: Extract and embed text from complex images using EasyOCR + Qwen.
+    - **Transcription**: Convert audio to text via Faster-Whisper and embed the resulting transcript.
+- **Hybrid Retrieval**: Search by raw content (Image/Audio/Video) or by semantic descriptions (Text).
+- **HPC Optimized**: Support for distributed training on RCAC Gautschi (H100/A100) with full checkpointing and resume capabilities.
+
+---
+
+## 🛠️ Technical Architecture
+
+### 1. Multimodal Core (Qwen3-VL)
+The engine uses **Qwen3-VL-Embedding-2B** as its primary anchor. 
+
+- **Text/Images/Video**: Handled natively by the Qwen transformer  
+- **Dimensionality**: All outputs are L2-normalized float32 vectors of size **2048**
+
+---
+
+### 2. Audio Bridge (CLAP + Projection)
+
+Since Qwen3-VL does not natively support audio, we implement a **CLAP-to-Qwen Adapter**:
+
+- **Backbone**: `laion/clap-htsat-unfused` (frozen)
+- **Projection Head**: 2-layer MLP (512 → 1024 → 2048)
+- **Training**: Contrastive InfoNCE loss (Cosine Similarity) on AudioSetCaps
+
+---
+
+### 3. Processing Chains
+
+- **OCR Pipeline**: `EasyOCR` → `Qwen Text Embedder`  
+- **Whisper Pipeline**: `Faster-Whisper (large-v3)` → `Qwen Text Embedder`  
+
+---
+
+## 📦 Setup & Installation
+
+### 1. Environment
+
+Ensure you have `uv` installed, then:
+
+```bash
+uv sync
+````
+
+---
+
+### 2. Model Downloads
+
+```bash
+uv run python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-VL-Embedding-2B', local_dir='models/Qwen3-VL-Embedding-2B')"
+```
+
+---
+
+## 🗄️ Qdrant Setup (Required)
+
+Pull and run Qdrant locally:
+
+```bash
+docker pull qdrant/qdrant
+
+mkdir -p qdrant_storage
+
+docker run -p 6333:6333 -p 6334:6334 \
+  -v "$(pwd)/qdrant_storage:/qdrant/storage:z" \
+  qdrant/qdrant
+```
+
+Qdrant will now be running locally on:
+
+* API: `http://localhost:6333`
+* gRPC: `localhost:6334`
+
+---
+
+## 🖥️ UI Dependencies (Linux)
+
+Install required system libraries:
+
+```bash
+sudo apt update
+sudo apt install -y libgl1 libegl1 libxkbcommon-x11-0 libdbus-1-3
+
+sudo apt install -y libgl1 libegl1 libxkbcommon-x11-0 libdbus-1-3 \
+  libxcb-cursor0 libxrender1 libxi6 libxcomposite1 libxcursor1 libxtst6
+
+sudo apt update
+sudo apt install -y \
+  libgl1 libegl1 libdbus-1-3 libxkbcommon-x11-0 \
+  libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+  libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 \
+  libxcb-xinerama0 libx11-xcb1 libxrender1 libxi6 libxcomposite1 libxtst6
+```
+
+---
+
+## 🔍 Usage
+
+### Run Indexer
+
+```bash
+uv run python -m src.indexer.run_indexer
+```
+
+---
+
+### Run Interactive Search UI
+
+```bash
+uv run --active python main.py
+```
+
+---
+
+### Programmatic Embedding
+
+```python
+from src.embed.qwen import QwenEmbedder
+from src.embed.audio import AudioEmbedder
+
+qwen = QwenEmbedder()
+audio_aligner = AudioEmbedder(projection_path="path/to/projection.pt")
+
+text_vec = qwen.embed("Heavy rain on a metal roof")
+audio_vec = audio_aligner.embed(waveform, sample_rate=48000)
+
+similarity = (text_vec @ audio_vec.T).item()
+```
+
+---
+
+## 🏗️ Indexing System
+
+* **Directory**: `trusted/`
+* **Backend**: Qdrant
+* **Hashing**: BLAKE3 for incremental updates
+
+### Multi-Pipeline Indexing
+
+* Images → Visual + OCR embeddings
+* Audio → CLAP + Whisper transcript embeddings
+* Video → Raw multimodal embeddings + metadata
+
+---
+
+## 🎓 Training (RCAC Gautschi)
+
+### 1. Prepare Dataset
+
+```bash
+uv run python -m src.embed.train.prepare_subset --n_samples 5000
+```
+
+---
+
+### 2. Fetch Audio
+
+```bash
+uv run python -m src.embed.train.fetch_yt_sample --cookies cookies.txt
+```
+
+---
+
+### 3. Train Projection Head
+
+```bash
+uv run python -m src.embed.train.train_loop
+```
+
+* Automatically resumes from `latest.pt`
+* Optimized for H100/A100 (1000+ it/s)
+
+---
+
+## 📂 Project Structure
+
+```
+src/
+  embed/        # Model wrappers (Qwen, CLAP, Whisper)
+  indexer/      # File monitoring + Qdrant integration
+  search/       # Retrieval + ranking logic
+
+trusted/        # User data directory
+models/         # Local model weights
+data/           # Training data (gitignored)
+```
+
+---
+
+## ⚡ Notes
+
+* Qdrant **must be running** before indexing/search
+* First indexing run may take time depending on dataset size
+* Supports cross-modal queries (e.g., text → image, audio → text)
+
+---
+
+## 🧠 Vision
+
+MME is designed as a **local-first memory layer** for everything you’ve seen, heard, or saved — instantly searchable, modality-agnostic, and scalable.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
