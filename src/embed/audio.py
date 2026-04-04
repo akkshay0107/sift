@@ -111,12 +111,7 @@ class AudioEmbedder:
             else:
                 device = "cpu"
         self.device = torch.device(device)
-        
-        # Optimization: Use float16 on NVIDIA; MPS float16 causes BatchNorm aborts in CLAP.
-        if dtype == torch.float32 and self.device.type == "cuda":
-            self.dtype = torch.float16
-        else:
-            self.dtype = dtype
+        self.dtype = dtype
 
         # -- CLAP backbone (audio encoder only) --
         self._processor = ClapProcessor.from_pretrained(clap_model_id)

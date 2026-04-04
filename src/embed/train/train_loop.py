@@ -14,7 +14,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, Dataset, TensorDataset
-from tqdm import tqdm
 
 from src.embed.audio import AudioEmbedder
 from src.embed.qwen import QwenEmbedder
@@ -91,13 +90,15 @@ def train():
 
     print("Initializing Base Models...")
     
-    # Safe float fallback for CPU/MPS locally, bfloat16 for CUDA
-    dtype = torch.float32 if device.type in ["cpu", "mps"] else torch.bfloat16
-        
-    qwen = QwenEmbedder(dtype=dtype)  
-    aligner = AudioEmbedder(device=device, dtype=dtype)
+    # Initialize natively. Our classes automatically detect NVIDIA (bfloat16) 
+    # vs Apple Silicon (float16/float32) and handle the fallbacks internally.
+    qwen = QwenEmbedder()  
+    aligner = AudioEmbedder(device=device)
 
-    proj_head = aligner.projection_head()
+    # Grab the Qwen dtype to use for the text/audio caching arrays later
+    cache_dtype = qwen._embedder.model.dtype 
+
+    proj_head = aligner.projection_head().float()
     proj_head.train()
 
     logit_scale = nn.Parameter(torch.tensor(math.log(1 / 0.07), device=device))
@@ -152,9 +153,9 @@ def train():
     all_text_embeds = []
     all_clap_embeds = []
 
-    for audios, texts in tqdm(pre_loader, desc="Precomputing Base Models"):
+    for audios, texts in pre_loader:
         with torch.no_grad():
-            text_emb = qwen.embed_batch(texts).to(device, dtype=dtype)
+            text_emb = qwen.embed_batch(texts).to(device, dtype=cache_dtype)
 
             inputs = aligner._processor(
                 audio=audios,
@@ -162,7 +163,7 @@ def train():
                 return_tensors="pt",
                 padding=True,
             )
-            input_features = inputs["input_features"].to(device, dtype=dtype)
+            input_features = inputs["input_features"].to(device, dtype=cache_dtype)
 
             audio_outputs = aligner._audio_model(input_features=input_features)
             clap_emb = aligner._audio_projection(audio_outputs.pooler_output)
@@ -193,11 +194,10 @@ def train():
         epoch_loss = 0.0
         current_lr = optimizer.param_groups[0]["lr"]
         
-        pbar = tqdm(fast_loader, desc=f"Epoch {epoch + 1}/{EPOCHS}")
-        for batch_clap, batch_text in pbar:
+        for batch_clap, batch_text in fast_loader:
             # Move precomputed batch directly to GPU
-            batch_clap = batch_clap.to(device, dtype=dtype)
-            batch_text = batch_text.to(device, dtype=dtype)
+            batch_clap = batch_clap.to(device, dtype=cache_dtype)
+            batch_text = batch_text.to(device, dtype=cache_dtype)
             
             optimizer.zero_grad(set_to_none=True)
 
@@ -227,7 +227,6 @@ def train():
             optimizer.step()
 
             epoch_loss += loss.item()
-            pbar.set_postfix(loss=f"{loss.item():.4f}", temp=f"{scale.item():.2f}")
 
         avg_loss = epoch_loss / len(fast_loader)
         print(f"\n==== Epoch {epoch + 1} Summary ====")
