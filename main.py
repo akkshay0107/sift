@@ -16,6 +16,7 @@ def print_results(matches: list[FileSearchResult]) -> None:
     for idx, match in enumerate(matches, start=1):
         print(f"{idx}. {match.file_name}")
         print(f"   location: {match.source_path}")
+        print(f"   similarity: {match.score:.4f}")
 
 
 def main() -> None:
