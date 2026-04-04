@@ -1,13 +1,11 @@
 import argparse
+import os
 import subprocess
 from pathlib import Path
 
 import pandas as pd
 
 
-# TODO: find a way to associate your account with yt-dlp
-# a lot of the request start getting denied if you don't
-# which would lead to no audio clip gettind downloaded.
 def fetch_audio(youtube_id, start_sec, duration, out_file, skip_existing=True):
     """
     Downloads and trims audio from a YouTube video.
@@ -17,12 +15,10 @@ def fetch_audio(youtube_id, start_sec, duration, out_file, skip_existing=True):
         return True
 
     url = f"https://www.youtube.com/watch?v={youtube_id}"
-    print(
-        f"Fetching audio for {youtube_id} ({start_sec}s to {start_sec + duration}s)..."
-    )
+    print(f"Fetching audio for {youtube_id} ({start_sec}s to {start_sec + duration}s)...")
 
     # Using yt-dlp to download and ffmpeg via postprocessor to trim/resample
-    # -ar 16000: 16kHz
+    # -ar 48000: 48kHz (to match CLAP expectations)
     # -ac 1: mono
     cmd = [
         "yt-dlp",
@@ -30,20 +26,18 @@ def fetch_audio(youtube_id, start_sec, duration, out_file, skip_existing=True):
         "--audio-format",
         "wav",
         "--postprocessor-args",
-        f"ffmpeg:-ar 16000 -ac 1 -ss {start_sec} -t {duration}",
+        f"ffmpeg:-ar 48000 -ac 1 -ss {start_sec} -t {duration}",
         "-o",
         str(out_file.with_suffix(".%(ext)s")),
         url,
     ]
 
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
         print(f"Successfully saved to {out_file}")
         return True
     except subprocess.CalledProcessError as e:
-        print(
-            f"Failed to download {youtube_id}. The video might be unavailable or private."
-        )
+        print(f"Failed to download {youtube_id}. The video might be unavailable or private.")
         return False
 
 
@@ -56,18 +50,31 @@ def batch_fetch(csv_path, audio_dir, limit=None, skip_existing=True):
         return
 
     audio_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Reading CSV from {csv_path}...")
     df = pd.read_csv(csv_path)
+
+    # Validate Schema before fetching
+    if "id" not in df.columns:
+        print("Error: CSV must contain an 'id' column.")
+        return
+    if "caption" not in df.columns:
+        print("Error: CSV must contain a 'caption' column.")
+        return
 
     if limit:
         df = df.head(limit)
+        print(f"Limiting fetch to first {limit} rows.")
 
     for _, row in df.iterrows():
-        youtube_id = row.get("id")
-        if youtube_id and youtube_id.startswith("Y"):
+        # Force the ID into a string to avoid weird edge cases
+        youtube_id = str(row["id"])
+        
+        # Strip potential audio-set prefix
+        if youtube_id.startswith("Y"):
             youtube_id = youtube_id[1:]
 
-        if not youtube_id:
-            print(f"Warning: Skipping row with missing YouTube ID.")
+        if not youtube_id.strip():
+            print("Warning: Skipping row with empty YouTube ID.")
             continue
 
         start_sec = int(row.get("start_time", 0))
@@ -75,23 +82,25 @@ def batch_fetch(csv_path, audio_dir, limit=None, skip_existing=True):
         duration = max(1, end_sec - start_sec)
 
         out_file = audio_dir / f"{youtube_id}.wav"
-        fetch_audio(
-            youtube_id, start_sec, duration, out_file, skip_existing=skip_existing
-        )
+        fetch_audio(youtube_id, start_sec, duration, out_file, skip_existing=skip_existing)
 
 
 if __name__ == "__main__":
+    scratch_base = os.environ.get("RCAC_SCRATCH", "./scratch")
+    default_csv = Path(scratch_base) / "engine" / "data" / "AudioSetCaps_caption_subset.csv"
+    default_out_dir = Path(scratch_base) / "engine" / "audio"
+
     parser = argparse.ArgumentParser(description="Fetch audio samples from YouTube.")
     parser.add_argument(
         "--csv",
         type=str,
-        default="data/AudioSetCaps_caption_subset.csv",
+        default=str(default_csv),
         help="Path to the subset CSV.",
     )
     parser.add_argument(
         "--out_dir",
         type=str,
-        default="data/audio",
+        default=str(default_out_dir),
         help="Directory to save audio files.",
     )
     parser.add_argument(
@@ -113,11 +122,10 @@ if __name__ == "__main__":
     csv_path = Path(args.csv)
     audio_dir = Path(args.out_dir)
 
+    print(f"Output directory set to: {audio_dir}")
     if args.id:
         out_file = audio_dir / f"{args.id}.wav"
         audio_dir.mkdir(parents=True, exist_ok=True)
-        # For a single ID, we'll use default 0s start and 10s duration if not in CSV context
-        # In a real batching scenario, we'd want more metadata.
         fetch_audio(args.id, 0, 10, out_file, skip_existing=args.skip_existing)
     else:
         batch_fetch(

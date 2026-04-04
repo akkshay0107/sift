@@ -116,7 +116,7 @@ class AudioEmbedder:
         self._audio_projection = clap.audio_projection.to(self.device).eval()
 
         # -- Projection head (512 → 2048) --
-        self._projection = ProjectionHead().to(self.device)
+        self._projection = ProjectionHead(dropout=0.2).to(self.device)
         if projection_path is not None:
             state = torch.load(projection_path, map_location=self.device)
             self._projection.load_state_dict(state)
