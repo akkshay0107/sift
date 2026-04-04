@@ -1,108 +1,123 @@
-# Multimodal Memory Engine
+# Multimodal Memory Engine (MME)
 
-This repository hosts a local multimodal embedding engine leveraging huggingface's **Qwen3-VL-Embedding-2B** base model safely stripped of tracking frameworks and completely reliant on PyTorch execution.
+A high-performance local embedding and retrieval engine designed for instant multimodal semantic search across Text, Images, and Audio. Built to operate as a "Memory Engine" with zero-friction access to your personal or project data.
 
-Given an image and/or text string, it passes the input directly into the dense vision/text transformers and exports a unified 2048-dimensional float32 vector, enabling instant multimodal semantic retrieval comparisons.
+## 🚀 Key Features
 
-## 1. Setup Environment
+- **Unified Embedding Space**: Maps Text, Images, and Audio into a shared 2048-dimensional vector space.
+- **Qwen3-VL Backbone**: Leverages the state-of-the-art **Qwen3-VL-Embedding-2B** for native vision and text understanding.
+- **Audio-to-Multimodal Alignment**: Bridges the gap between Audio (CLAP) and Text/Vision (Qwen) via a learned Projection Head trained on AudioSetCaps.
+- **OCR & Transcript Chains**: 
+    - **OCR**: Extract and embed text from complex images using EasyOCR + Qwen.
+    - **Transcription**: Convert audio to text via Faster-Whisper and embed the resulting transcript.
+- **Hybrid Retrieval**: Search by raw content (Image/Audio) or by semantic descriptions (Text).
+- **HPC Optimized**: Support for distributed training on RCAC Gautschi (H100/A100) with full checkpointing and resume capabilities.
 
-Ensure you have `uv` installed, then add the necessary machine learning dependencies to your local package:
+---
 
+## 🛠️ Technical Architecture
+
+### 1. Multimodal Core (Qwen3-VL)
+The engine uses **Qwen3-VL-Embedding-2B** as its primary anchor. 
+- **Text/Images**: Handled natively by the Qwen transformer. 
+- **Dimensionality**: All outputs are L2-normalized float32 vectors of size **2048**.
+
+### 2. Audio Bridge (CLAP + Projection)
+Since Qwen3-VL does not natively support audio, we implement a **CLAP-to-Qwen Adapter**:
+- **Backbone**: `laion/clap-htsat-unfused` (frozen).
+- **Projection Head**: A 2-layer MLP (512 → 1024 → 2048) that translates CLAP's audio features into the Qwen anchor space.
+- **Training**: Trained using a Contrastive InfoNCE loss (Cosine Similarity) on the AudioSetCaps dataset.
+
+### 3. Processing Chains
+- **OCR Pipeline**: `EasyOCR` -> `Qwen Text Embedder`. Best for documents and screenshots.
+- **Whisper Pipeline**: `Faster-Whisper` (large-v3) -> `Qwen Text Embedder`. Generates semantic descriptors for audio files.
+
+---
+
+## 📦 Setup & Installation
+
+### 1. Environment
+Ensure you have `uv` installed, then synchronize the environment:
 ```bash
-uv add "transformers>=4.57.0" "qwen-vl-utils>=0.0.14" "torch==2.8.0" pillow torchvision huggingface_hub
+uv sync
 ```
 
-## 2. Download the Model
-
-You will need to fetch the local copy (~5GB) of the Qwen parameters. Execute this directly using `uv run` to snapshot the payload straight into your local `models` directory:
-
+### 2. Model Downloads
+Fetch the Qwen parameters (~5GB):
 ```bash
 uv run python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-VL-Embedding-2B', local_dir='models/Qwen3-VL-Embedding-2B')"
 ```
 
-## 3. Usage
+---
 
-The Python entry interface (`src/embed/qwen.py`) natively wraps the model routing.
+## 🔍 Usage Examples
 
+### Semantic File Search
+The main entry point (`main.py`) provides an interactive CLI to search through your `trusted/` directory.
+```bash
+uv run main.py
+```
+
+### Programmatic Embedding
 ```python
 from src.embed.qwen import QwenEmbedder
+from src.embed.audio import AudioEmbedder
 
-# 1. Initialize the class
-embedder = QwenEmbedder()
+# Initialize
+qwen = QwenEmbedder()
+audio_aligner = AudioEmbedder(projection_path="path/to/projection.pt")
 
-# 2a. Embed Text
-text_embedding = embedder.embed("A modern kitchen with wooden cabinets")
+# Cross-modal Similarity
+text_vec = qwen.embed("Heavy rain on a metal roof")
+audio_vec = audio_aligner.embed(waveform, sample_rate=48000)
 
-# 2b. Embed an Image
-# Automatically maps inputs matching paths/URLs into visual encoding
-image_embedding = embedder.embed("tests/test.png")
-
-# 3. Calculate zero-copy L2 Similarity
-score = (text_embedding @ image_embedding.T).item()
-print(f"Similarity Score: {score}")
+similarity = (text_vec @ audio_vec.T).item()
 ```
 
-### Local Testing
+---
 
-The `tests/` directory uses automated pytest suites to strictly test tensor routing and shape dimensionality.
-Run the complete testing matrix:
+## 🏗️ Indexing System
+The indexer monitors the `trusted/` directory and synchronizes it with a local **Qdrant** vector database.
 
+- **Incremental Updates**: Uses BLAKE3 content hashing to skip unchanged files.
+- **Multi-Pipeline Expansion**: A single image is indexed as both a raw visual embedding AND an OCR text embedding. Audio is indexed as both a CLAP vector and a Whisper transcript.
+- **Storage**: Qdrant runs locally (default port 6333).
+
+To run the indexer manually:
 ```bash
-uv run pytest tests/
+uv run python -m src.indexer.run_indexer
 ```
 
-## 4. OCR Chaining
+---
 
-You can instantly read raw text from complex images and route it directly into a semantic tensor via the `OCREmbeddingPipeline`.
+## 🎓 Training (RCAC Gautschi)
+The project includes a robust training pipeline for the Audio Projection Head, optimized for the RCAC Gautschi HPC cluster.
 
-```python
-from src.embed.ocr_chain import OCREmbeddingPipeline
-
-pipeline = OCREmbeddingPipeline()
-
-# Get the concatenated OCR text AND the encoded 2048-dim vector
-text, embedding = pipeline.process("tests/document.png", return_embedding=True)
-
-# Or simply extract the text without consuming heavy LLM resources
-text = pipeline.process("tests/document.png", return_embedding=False)
-```
-
-## AudioSetCaps subset setup
-
-This project uses a small local subset of AudioSetCaps instead of the full dataset for local validation.
-
-### Install dependencies
-
+### 1. Prepare Dataset
 ```bash
-uv add pandas huggingface_hub yt-dlp
+# Fetches 5000 samples and formats for training
+uv run python -m src.embed.train.prepare_subset --n_samples 5000
 ```
 
-You also need `ffmpeg` installed on your system.
-
-### Prepare caption metadata
-
+### 2. Fetch Audio (Rate-Limit Aware)
+Downloads YouTube samples with anti-throttling logic and cookie support:
 ```bash
-uv run src/embed/train/prepare_subset.py
+uv run python -m src.embed.train.fetch_yt_sample --cookies cookies.txt
 ```
 
-This downloads only the caption CSV from HuggingFace and writes a small subset (100 rows) to:
-
-```text
-data/AudioSetCaps_caption_subset.csv
-```
-
-### Download audio samples
-
+### 3. Execute Training
+Uses a "Fast Loop" strategy: precomputes frozen backbones to RAM/Disk once, then trains the MLP at 1000+ iterations/sec on H100 GPUs.
 ```bash
-# Download the first 5 samples from the subset
-uv run src/embed/train/fetch_yt_sample.py --limit 5
-
-# Download a specific YouTube ID
-uv run src/embed/train/fetch_yt_sample.py --id "dQw4w9WgXcQ"
+# Resumes automatically from latest.pt if found
+uv run python -m src.embed.train.train_loop
 ```
 
-This picks samples from the subset CSV, downloads the corresponding YouTube clips, trims them, and converts them to 16kHz mono WAV files in:
+---
 
-```text
-data/audio/
-```
+## 📂 Project Structure
+- `src/embed/`: Core model wrappers (Qwen, CLAP, Whisper).
+- `src/indexer/`: File monitoring, Qdrant integration, and indexing pipelines.
+- `src/search/`: Vector similarity search and result aggregation logic.
+- `trusted/`: The default directory for your personal files to be indexed.
+- `data/`: Local storage for training CSVs and audio samples (gitignored).
+- `models/`: Local storage for large model weights.
