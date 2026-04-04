@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from src.search import FileSearchResult, search_similar_files
 
 
@@ -20,6 +22,17 @@ def print_results(matches: list[FileSearchResult]) -> None:
 
 
 def main() -> None:
+    if "--cli" not in sys.argv[1:]:
+        try:
+            from src.ui import launch_desktop_app
+        except ImportError as exc:
+            raise SystemExit(
+                "Desktop UI dependencies are missing. Install project dependencies and retry, "
+                f"or run with --cli.\n\nImport error: {exc}"
+            ) from exc
+
+        raise SystemExit(launch_desktop_app())
+
     print("Semantic File Search")
     print("Enter a prompt to find similar files. Type 'q' to quit.\n")
 
