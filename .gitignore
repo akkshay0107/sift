@@ -13,6 +13,9 @@ wheels/
 # Local models
 models/
 
+# Daemon logs
+*.log
+
 .DS_Store
 
 qdrant_storage/
@@ -20,3 +23,6 @@ data/
 scratch/
 cookies.txt
 
+# specific to my system since
+# IPv6 localhost fails to load
+launch_qdrant.sh
