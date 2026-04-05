@@ -53,7 +53,7 @@ Sift uses an incremental indexing strategy to minimize redundant processing and 
 
 The project includes a futuristic, minimalist desktop application built with PySide6:
 
-- **Categorized Results**: Specialized views for file lists, top matches, live metadata snapshots, and recognized entities.
+- **Bundle-Centric Results**: Search results are grouped into up to three top-ranked bundles plus a recognized-entities list.
 - **Keyboard-First Design**: Optimized for rapid use with shortcuts like `Esc` to close and `Enter` to execute queries.
 
 ---
@@ -121,7 +121,7 @@ uv run python -m src.indexer.run_indexer
 
 ### Unified Daemon
 
-To run the main daemon that performs the startup scan, watches for new/modified files, and keeps the desktop UI resident in a hidden state:
+To run the main daemon that explicitly preloads the shared Qwen model, performs the startup scan, watches for new/modified files, and then launches the desktop UI process:
 
 ```bash
 uv run python -m src.daemon
@@ -132,6 +132,18 @@ To run the daemon persistently in the background (even after closing your termin
 ```bash
 nohup uv run python -m src.daemon > daemon.log 2>&1 &
 ```
+
+Current startup order for the unified daemon:
+
+1. Preload the shared Qwen embedder once.
+2. Perform the initial indexing scan of monitored directories.
+3. Start the watchdog observer for new and modified files.
+4. Launch the PySide6 UI process.
+
+Notes:
+
+- The unified daemon is intended to share the in-process Qwen singleton between indexing and search.
+- On Linux/WSL, desktop UI visibility and global hotkey behavior may depend on the host desktop environment and current UI implementation.
 
 If you only want the legacy indexing-only watcher without the UI process attached:
 
