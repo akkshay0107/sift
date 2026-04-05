@@ -2,6 +2,8 @@
 
 Sift is a high-performance local embedding and retrieval engine designed for instant multimodal semantic search across text, images, audio, and video. It operates as a personal memory layer, providing zero-friction access to indexed data through a unified vector space.
 
+![Sift Logo](assets/logo.png)
+
 ---
 
 ## Core Architecture
