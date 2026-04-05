@@ -1,7 +1,7 @@
+import gc
 import math
 import os
 import sys
-import gc
 from pathlib import Path
 
 # Add the project root to the PYTHONPATH so 'src' can be found
@@ -20,15 +20,28 @@ from src.embed.audio import AudioEmbedder, ProjectionHead
 from src.embed.qwen import QwenEmbedder
 
 scratch_base = os.environ.get("RCAC_SCRATCH", "./scratch")
-CSV_PATH = os.environ.get("CSV_PATH", str(Path(scratch_base) / "engine" / "data" / "AudioSetCaps_caption_subset.csv"))
+CSV_PATH = os.environ.get(
+    "CSV_PATH",
+    str(Path(scratch_base) / "engine" / "data" / "AudioSetCaps_caption_subset.csv"),
+)
 AUDIO_DIR = os.environ.get("AUDIO_DIR", str(Path(scratch_base) / "engine" / "audio"))
-CHECKPOINT_DIR = os.environ.get("CHECKPOINT_DIR", str(Path(scratch_base) / "engine" / "checkpoints"))
+CHECKPOINT_DIR = os.environ.get(
+    "CHECKPOINT_DIR", str(Path(scratch_base) / "engine" / "checkpoints")
+)
 
-PRECOMPUTE_BATCH_SIZE = int(os.environ.get("PRECOMPUTE_BATCH_SIZE", 8)) # Small batches for heavy models
-TRAIN_BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1024)) # Massive batches for gradient optimization
-EPOCHS = int(os.environ.get("EPOCHS", 50))
-LR = float(os.environ.get("LR", 1e-4))
-WEIGHT_DECAY = float(os.environ.get("WEIGHT_DECAY", 0.2))
+PRECOMPUTE_BATCH_SIZE = int(os.environ.get("PRECOMPUTE_BATCH_SIZE", 8))
+TRAIN_BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1024))
+EPOCHS = int(os.environ.get("EPOCHS", 25))
+LR = float(os.environ.get("LR", 2.5e-4))
+WEIGHT_DECAY = float(os.environ.get("WEIGHT_DECAY", 0.1))
+
+VAL_SPLIT = float(os.environ.get("VAL_SPLIT", 0.1))
+SEED = int(os.environ.get("SEED", 42))
+GRAD_CLIP_NORM = float(os.environ.get("GRAD_CLIP_NORM", 1.0))
+
+# Temperature is inverse scale: scale = exp(logit_scale) = 1 / temp
+MIN_TEMP = float(os.environ.get("MIN_TEMP", 0.01))
+MAX_TEMP = float(os.environ.get("MAX_TEMP", 0.20))
 
 
 class AudioTextDataset(Dataset):
@@ -36,18 +49,18 @@ class AudioTextDataset(Dataset):
         print(f"Loading CSV from: {csv_file}")
         self.df = pd.read_csv(csv_file)
         self.audio_dir = Path(audio_dir)
-        
+
         print("Verifying audio files exist to prevent missing samples...")
         valid_rows = []
         for idx, row in self.df.iterrows():
             yt_id = str(row.get("id", str(row.name)))
             if yt_id.startswith("Y"):
                 yt_id = yt_id[1:]
-            
+
             audio_path = self.audio_dir / f"{yt_id}.wav"
             if audio_path.exists():
                 valid_rows.append(idx)
-        
+
         original_len = len(self.df)
         self.df = self.df.loc[valid_rows].reset_index(drop=True)
         print(f"Retained {len(self.df)} valid pairs from {original_len} total rows.")
@@ -62,9 +75,8 @@ class AudioTextDataset(Dataset):
             yt_id = yt_id[1:]
 
         audio_path = self.audio_dir / f"{yt_id}.wav"
-        
+
         try:
-            # 48kHz mono loading
             audio_array, _ = librosa.load(audio_path, sr=48000, mono=True)
         except Exception as e:
             print(f"Warning: Failed to load {audio_path}: {e}")
@@ -79,30 +91,31 @@ def collate_fn(batch):
 
 
 def load_dataset() -> AudioTextDataset:
-    """Step 1: Parse the CSV and load the valid subset into memory."""
     print("Configuring Dataloader...")
     dataset = AudioTextDataset(CSV_PATH, AUDIO_DIR)
-    
+
     if len(dataset) == 0:
-        raise ValueError("CRITICAL: No valid dataset found to train on. Check directories. Exiting.")
-        
+        raise ValueError(
+            "CRITICAL: No valid dataset found to train on. Check directories. Exiting."
+        )
+
     return dataset
 
 
-def precompute_embeddings(dataset: AudioTextDataset, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, ProjectionHead]:
-    """Step 2: Calculate embedding maps and wipe the foundation models from memory."""
+def precompute_embeddings(
+    dataset: AudioTextDataset, device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor, ProjectionHead]:
     print("Initializing Base Models...")
-    
-    qwen = QwenEmbedder()  
+
+    qwen = QwenEmbedder()
     aligner = AudioEmbedder(device=device)
 
-    # Grab the Qwen dtype to use for the text/audio caching arrays later
-    cache_dtype = qwen._embedder.model.dtype 
-    
-    # Detach projection head to survive model deletion
+    cache_dtype = qwen._embedder.model.dtype
     proj_head = aligner.projection_head().float()
-    
-    num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 4 if torch.cuda.is_available() else 0))
+
+    num_workers = int(
+        os.environ.get("SLURM_CPUS_PER_TASK", 4 if torch.cuda.is_available() else 0)
+    )
     pre_loader = DataLoader(
         dataset,
         batch_size=PRECOMPUTE_BATCH_SIZE,
@@ -111,18 +124,18 @@ def precompute_embeddings(dataset: AudioTextDataset, device: torch.device) -> tu
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
     )
-    
+
     all_text_embeds = []
     all_clap_embeds = []
 
-    print("Precomputing Base Embeddings (This runs exactly ONCE)...")
+    print("Precomputing Base Embeddings...")
     for audios, texts in pre_loader:
         with torch.no_grad():
             text_emb = qwen.embed_batch(texts).to(device, dtype=cache_dtype)
 
             inputs = aligner._processor(
                 audio=audios,
-                sampling_rate=aligner.CLAP_SAMPLE_RATE, # 48000
+                sampling_rate=aligner.CLAP_SAMPLE_RATE,
                 return_tensors="pt",
                 padding=True,
             )
@@ -132,16 +145,14 @@ def precompute_embeddings(dataset: AudioTextDataset, device: torch.device) -> tu
             clap_emb = aligner._audio_projection(audio_outputs.pooler_output)
             clap_emb = F.normalize(clap_emb, p=2, dim=-1)
 
-            # Move to CPU RAM temporarily to save precious GPU VRAM
             all_text_embeds.append(text_emb.cpu())
             all_clap_embeds.append(clap_emb.cpu())
-            
+
     tensor_text = torch.cat(all_text_embeds, dim=0)
     tensor_clap = torch.cat(all_clap_embeds, dim=0)
-    
+
     print(f"Precomputed Shapes - Audio: {tensor_clap.shape}, Text: {tensor_text.shape}")
-    
-    # Memory Cleanup: Free the massive models before the training loop
+
     print("Precomputing complete! Purging Foundation Models from memory...")
     del qwen
     del aligner._audio_model
@@ -149,17 +160,139 @@ def precompute_embeddings(dataset: AudioTextDataset, device: torch.device) -> tu
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-        
+
     return tensor_clap, tensor_text, proj_head
 
 
-def train_projection_head(tensor_clap: torch.Tensor, tensor_text: torch.Tensor, proj_head: ProjectionHead, device: torch.device):
-    """Step 3: Train the Projection Head natively against the cached tensors."""
+def split_cached_tensors(
+    tensor_clap: torch.Tensor,
+    tensor_text: torch.Tensor,
+    val_split: float,
+    seed: int,
+) -> tuple[TensorDataset, TensorDataset]:
+    num_samples = tensor_clap.size(0)
+    if num_samples < 2:
+        raise ValueError("Need at least 2 samples to create a train/val split.")
+
+    if not (0.0 < val_split < 0.5):
+        raise ValueError(f"VAL_SPLIT must be in (0, 0.5), got {val_split}")
+
+    num_val = max(1, int(num_samples * val_split))
+    num_train = num_samples - num_val
+    if num_train < 1:
+        raise ValueError("Validation split left no samples for training.")
+
+    g = torch.Generator().manual_seed(seed)
+    perm = torch.randperm(num_samples, generator=g)
+    val_idx = perm[:num_val]
+    train_idx = perm[num_val:]
+
+    train_dataset = TensorDataset(tensor_clap[train_idx], tensor_text[train_idx])
+    val_dataset = TensorDataset(tensor_clap[val_idx], tensor_text[val_idx])
+
+    print(f"Train/Val split: {len(train_dataset)} / {len(val_dataset)}")
+    return train_dataset, val_dataset
+
+
+def clamp_logit_scale_(logit_scale: torch.Tensor, min_temp: float, max_temp: float):
+    if min_temp <= 0 or max_temp <= 0 or min_temp > max_temp:
+        raise ValueError(f"Invalid temperature bounds: min={min_temp}, max={max_temp}")
+
+    min_logit = math.log(1.0 / max_temp)
+    max_logit = math.log(1.0 / min_temp)
+    with torch.no_grad():
+        logit_scale.clamp_(min=min_logit, max=max_logit)
+
+
+def compute_contrastive_loss(
+    batch_clap: torch.Tensor,
+    batch_text: torch.Tensor,
+    proj_head: ProjectionHead,
+    logit_scale: torch.Tensor,
+    device: torch.device,
+) -> tuple[torch.Tensor, float]:
+    batch_clap = batch_clap.to(device, non_blocking=True)
+    batch_text = batch_text.to(device, non_blocking=True)
+
+    raw_audio_embeds = proj_head(batch_clap.float())
+    audio_embeds = F.normalize(raw_audio_embeds, p=2, dim=-1).float()
+    text_embeds = F.normalize(batch_text.float(), p=2, dim=-1).float()
+
+    scale = logit_scale.exp()
+    logits_per_audio = scale * (audio_embeds @ text_embeds.t())
+    logits_per_text = logits_per_audio.t()
+
+    labels = torch.arange(audio_embeds.size(0), device=device)
+    loss_a = F.cross_entropy(logits_per_audio, labels)
+    loss_t = F.cross_entropy(logits_per_text, labels)
+    loss = 0.5 * (loss_a + loss_t)
+
+    return loss, float(scale.detach().item())
+
+
+@torch.no_grad()
+def evaluate(
+    proj_head: ProjectionHead,
+    logit_scale: torch.Tensor,
+    loader: DataLoader,
+    device: torch.device,
+    max_batches: int | None = None,
+) -> tuple[float, float]:
+    proj_head.eval()
+    total_loss = 0.0
+    total_batches = 0
+    last_scale = float(logit_scale.exp().detach().item())
+
+    for batch_idx, (batch_clap, batch_text) in enumerate(loader):
+        loss, last_scale = compute_contrastive_loss(
+            batch_clap, batch_text, proj_head, logit_scale, device
+        )
+        total_loss += loss.item()
+        total_batches += 1
+
+        if max_batches is not None and (batch_idx + 1) >= max_batches:
+            break
+
+    avg_loss = total_loss / max(1, total_batches)
+    return avg_loss, last_scale
+
+
+def train_projection_head(
+    tensor_clap: torch.Tensor,
+    tensor_text: torch.Tensor,
+    proj_head: ProjectionHead,
+    device: torch.device,
+):
     Path(CHECKPOINT_DIR).mkdir(parents=True, exist_ok=True)
     print(f"Checkpoints will be managed in: {CHECKPOINT_DIR}")
 
+    train_dataset, val_dataset = split_cached_tensors(
+        tensor_clap, tensor_text, VAL_SPLIT, SEED
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=TRAIN_BATCH_SIZE,
+        shuffle=True,
+        pin_memory=torch.cuda.is_available(),
+        num_workers=0,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=TRAIN_BATCH_SIZE,
+        shuffle=False,
+        pin_memory=torch.cuda.is_available(),
+        num_workers=0,
+    )
+
+    proj_head = proj_head.to(device).float()
     proj_head.train()
-    logit_scale = nn.Parameter(torch.tensor(math.log(1 / 0.07), device=device))
+
+    default_temp = 0.07
+    logit_scale = nn.Parameter(
+        torch.tensor(math.log(1.0 / default_temp), device=device, dtype=torch.float32)
+    )
+    clamp_logit_scale_(logit_scale, MIN_TEMP, MAX_TEMP)
 
     optimizer = torch.optim.AdamW(
         [{"params": proj_head.parameters()}, {"params": [logit_scale]}],
@@ -167,86 +300,111 @@ def train_projection_head(tensor_clap: torch.Tensor, tensor_text: torch.Tensor, 
         weight_decay=WEIGHT_DECAY,
     )
 
-    scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS)
-    
-    # ======= RESUME SUPPORT =======
+    scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=EPOCHS,
+        eta_min=0.0,
+    )
+
     start_epoch = 0
+    global_step = 0
+    best_val_loss = float("inf")
+
     latest_path = Path(CHECKPOINT_DIR) / "latest.pt"
-    
+    best_path = Path(CHECKPOINT_DIR) / "best.pt"
     resume_file = os.environ.get("RESUME_PATH", str(latest_path))
+
     if Path(resume_file).exists():
         print(f"Loading checkpoint parameters from: {resume_file}")
-        # weights_only=False because optimizer states contain objects
         checkpoint = torch.load(resume_file, map_location=device, weights_only=False)
+
         proj_head.load_state_dict(checkpoint["proj_head_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        logit_scale.data = checkpoint["logit_scale"].to(device)
+
+        with torch.no_grad():
+            logit_scale.copy_(checkpoint["logit_scale"].to(device))
+
         start_epoch = checkpoint["epoch"] + 1
+        global_step = checkpoint.get("global_step", 0)
+        best_val_loss = checkpoint.get("best_val_loss", float("inf"))
+
+        clamp_logit_scale_(logit_scale, MIN_TEMP, MAX_TEMP)
         print(f"Successfully resumed at epoch {start_epoch}")
     else:
         print("No prior checkpoint found. Beginning new training run.")
 
-    fast_dataset = TensorDataset(tensor_clap, tensor_text)
-    fast_loader = DataLoader(fast_dataset, batch_size=TRAIN_BATCH_SIZE, shuffle=True)
-
-    print(f"Starting FAST Training Loop! Batches per epoch: {len(fast_loader)}")
+    print(
+        f"Starting training | train batches/epoch: {len(train_loader)} | "
+        f"val batches: {len(val_loader)}"
+    )
 
     for epoch in range(start_epoch, EPOCHS):
-        epoch_loss = 0.0
-        current_lr = optimizer.param_groups[0]["lr"]
-        
-        for batch_clap, batch_text in fast_loader:
-            # Move precomputed batch directly to GPU using its cached datatype
-            batch_clap = batch_clap.to(device)
-            batch_text = batch_text.to(device)
-            
+        proj_head.train()
+        epoch_train_loss = 0.0
+
+        for batch_clap, batch_text in train_loader:
             optimizer.zero_grad(set_to_none=True)
 
-            # Pass directly through our untended projection head
-            raw_audio_embeds = proj_head(batch_clap.float())
-
-            # CRITICAL: L2 Normalize and safely cast to float32 to ensure true Cosine Similarity for InfoNCE
-            audio_embeds = F.normalize(raw_audio_embeds, p=2, dim=-1).float()
-            batch_text = F.normalize(batch_text, p=2, dim=-1).float()
-
-            # Contrastive Loss (InfoNCE)
-            scale = torch.clamp(logit_scale.exp(), max=100.0)
-            logits_per_audio = scale * audio_embeds @ batch_text.t()
-            logits_per_text = logits_per_audio.t()
-
-            labels = torch.arange(len(audio_embeds), device=device)
-            loss_a = F.cross_entropy(logits_per_audio, labels)
-            loss_t = F.cross_entropy(logits_per_text, labels)
-            loss = (loss_a + loss_t) / 2.0
+            loss, _ = compute_contrastive_loss(
+                batch_clap, batch_text, proj_head, logit_scale, device
+            )
 
             loss.backward()
+            nn.utils.clip_grad_norm_(proj_head.parameters(), GRAD_CLIP_NORM)
             optimizer.step()
+            clamp_logit_scale_(logit_scale, MIN_TEMP, MAX_TEMP)
 
-            epoch_loss += loss.item()
+            epoch_train_loss += loss.item()
+            global_step += 1
 
-        avg_loss = epoch_loss / len(fast_loader)
+        avg_train_loss = epoch_train_loss / max(1, len(train_loader))
+        avg_val_loss, val_scale = evaluate(proj_head, logit_scale, val_loader, device)
+        current_lr = optimizer.param_groups[0]["lr"]
+        current_temp = 1.0 / val_scale
+
         print(f"\n==== Epoch {epoch + 1} Summary ====")
-        print(f"Avg Loss: {avg_loss:.4f} | LR: {current_lr:.2e} | Temp: {scale.item():.2f}")
+        print(
+            f"Train Loss: {avg_train_loss:.4f} | "
+            f"Val Loss: {avg_val_loss:.4f} | "
+            f"LR: {current_lr:.2e} | "
+            f"Scale: {val_scale:.2f} | "
+            f"Temp: {current_temp:.4f}"
+        )
 
         scheduler.step()
 
-        # ======= FULL STATE CHECKPOINT =======
         checkpoint = {
             "epoch": epoch,
+            "global_step": global_step,
+            "best_val_loss": best_val_loss,
             "proj_head_state_dict": proj_head.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
-            "logit_scale": logit_scale.data,
+            "logit_scale": logit_scale.detach().clone(),
+            "config": {
+                "epochs": EPOCHS,
+                "lr": LR,
+                "weight_decay": WEIGHT_DECAY,
+                "train_batch_size": TRAIN_BATCH_SIZE,
+                "val_split": VAL_SPLIT,
+                "min_temp": MIN_TEMP,
+                "max_temp": MAX_TEMP,
+                "seed": SEED,
+            },
         }
-        
+
         ckpt_path = Path(CHECKPOINT_DIR) / f"checkpoint_epoch_{epoch + 1:03d}.pt"
-        latest_path = Path(CHECKPOINT_DIR) / "latest.pt"
-        
         torch.save(checkpoint, ckpt_path)
         torch.save(checkpoint, latest_path)
-        
-        print(f"-> Saved robust Checkpoints to {CHECKPOINT_DIR}\n")
+
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            checkpoint["best_val_loss"] = best_val_loss
+            torch.save(checkpoint, best_path)
+            print(f"-> New best checkpoint saved: {best_path}")
+
+        print(f"-> Saved latest + epoch checkpoint(s) to {CHECKPOINT_DIR}\n")
 
 
 def run_pipeline():
@@ -256,16 +414,11 @@ def run_pipeline():
         device = torch.device("mps")
     else:
         device = torch.device("cpu")
-        
+
     print(f"Using compute device: {device}")
-    
-    # 1. Parse and extract validated dataset mapping (CPU bound)
+
     dataset = load_dataset()
-    
-    # 2. Extract arrays and wipe foundational memory limits (Heavy inference mapping)
     tensor_clap, tensor_text, proj_head = precompute_embeddings(dataset, device)
-    
-    # 3. High Velocity gradient matching (Lightweight loop computing)
     train_projection_head(tensor_clap, tensor_text, proj_head, device)
 
 
