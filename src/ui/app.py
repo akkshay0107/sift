@@ -8,12 +8,22 @@ import shutil
 import subprocess
 from typing import Callable
 
-from PySide6.QtCore import QItemSelectionModel, Qt, QUrl
+from PySide6.QtCore import (
+    QEasingCurve,
+    QItemSelectionModel,
+    QParallelAnimationGroup,
+    QPropertyAnimation,
+    QRect,
+    Qt,
+    QTimer,
+    QUrl,
+)
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QFrame,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -240,6 +250,7 @@ class MainWindow(QMainWindow):
         self._bundle_panels: list[MemoryPanel] = []
         self._last_bundle_focus_index = 0
         self._results_visible = False
+        self._active_animations: list[QParallelAnimationGroup] = []
 
         self._build_ui()
         self._apply_styles()
@@ -247,24 +258,36 @@ class MainWindow(QMainWindow):
         close_shortcut = QShortcut(QKeySequence("Esc"), self)
         close_shortcut.activated.connect(self.close)
 
+        QTimer.singleShot(0, self.play_intro_animation)
+
     def _build_ui(self) -> None:
         root = GridBackgroundWidget()
         self.setCentralWidget(root)
 
         page_layout = QVBoxLayout(root)
-        page_layout.setContentsMargins(420, 18, 420, 40)
+        page_layout.setContentsMargins(0, 18, 0, 40)
         page_layout.setSpacing(10)
         self.page_layout = page_layout
 
+        self.content_column = QWidget()
+        self.content_column.setMinimumWidth(1240)
+        self.content_column.setMaximumWidth(1240)
+        page_layout.addWidget(self.content_column, 0, Qt.AlignTop | Qt.AlignHCenter)
+
+        content_layout = QVBoxLayout(self.content_column)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(10)
+        self.content_layout = content_layout
+
         self.header = self._build_header()
-        page_layout.addWidget(self.header, 0, Qt.AlignTop)
+        content_layout.addWidget(self.header, 0, Qt.AlignTop)
 
         self.results_shell = QFrame()
         self.results_shell.setObjectName("shell")
         self.results_shell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self.results_shell.setMaximumHeight(560)
         self.results_shell.hide()
-        page_layout.addWidget(self.results_shell, 0, Qt.AlignTop)
+        content_layout.addWidget(self.results_shell, 0, Qt.AlignTop)
         page_layout.addStretch(1)
 
         shell_layout = QVBoxLayout(self.results_shell)
@@ -295,7 +318,7 @@ class MainWindow(QMainWindow):
         self.query_input.installEventFilter(self)
         layout.addWidget(self.query_input, 1)
 
-        self.cancel_label = QLabel("ESC_TO_CANCEL")
+        self.cancel_label = QLabel("ESC TO CANCEL")
         self.cancel_label.setObjectName("cancelLabel")
         layout.addWidget(self.cancel_label)
 
@@ -326,7 +349,6 @@ class MainWindow(QMainWindow):
 
     def _apply_styles(self) -> None:
         font_family = self._load_ui_font_family()
-        print(f"[ui] loaded font family: {font_family}")
         self._font_family = font_family
         font = QFont(font_family)
         font.setStyleHint(QFont.SansSerif)
@@ -507,6 +529,7 @@ class MainWindow(QMainWindow):
         if not self._results_visible:
             self._results_visible = True
             self._apply_search_compact_mode()
+        QTimer.singleShot(0, self.play_results_animation)
 
     def _update_from_search(
         self,
@@ -539,10 +562,6 @@ class MainWindow(QMainWindow):
 
     def _launch_path(self, target: Path) -> None:
         errors: list[str] = []
-
-        if QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))):
-            return
-        errors.append("QDesktopServices.openUrl returned false")
 
         system = platform.system()
 
@@ -787,7 +806,8 @@ class MainWindow(QMainWindow):
         widget.setCurrentRow(safe_row, QItemSelectionModel.ClearAndSelect)
 
     def _apply_search_compact_mode(self) -> None:
-        self.page_layout.setContentsMargins(300, 18, 300, 40)
+        self.content_column.setMinimumWidth(1160)
+        self.content_column.setMaximumWidth(1160)
         header_layout = self.header.layout()
         if isinstance(header_layout, QHBoxLayout):
             header_layout.setContentsMargins(22, 16, 22, 16)
@@ -841,6 +861,51 @@ class MainWindow(QMainWindow):
                 return families[0]
 
         return UI_FONT_FAMILY
+
+    def play_intro_animation(self) -> None:
+        self._animate_fly_in(self.header, distance=64, duration=620)
+
+    def play_results_animation(self) -> None:
+        self._animate_fly_in(self.results_shell, distance=52, duration=520)
+
+    def _animate_fly_in(self, widget: QWidget, *, distance: int, duration: int) -> None:
+        end_geometry = widget.geometry()
+        if end_geometry.isNull():
+            return
+
+        start_geometry = QRect(end_geometry)
+        start_geometry.translate(0, -distance)
+
+        effect = widget.graphicsEffect()
+        if not isinstance(effect, QGraphicsOpacityEffect):
+            effect = QGraphicsOpacityEffect(widget)
+            widget.setGraphicsEffect(effect)
+
+        geometry_anim = QPropertyAnimation(widget, b"geometry", self)
+        geometry_anim.setDuration(duration)
+        geometry_anim.setStartValue(start_geometry)
+        geometry_anim.setEndValue(end_geometry)
+        geometry_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        opacity_anim = QPropertyAnimation(effect, b"opacity", self)
+        opacity_anim.setDuration(duration)
+        opacity_anim.setStartValue(0.0)
+        opacity_anim.setEndValue(1.0)
+        opacity_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        group = QParallelAnimationGroup(self)
+        group.addAnimation(geometry_anim)
+        group.addAnimation(opacity_anim)
+
+        def cleanup() -> None:
+            widget.setGeometry(end_geometry)
+            effect.setOpacity(1.0)
+            if group in self._active_animations:
+                self._active_animations.remove(group)
+
+        group.finished.connect(cleanup)
+        self._active_animations.append(group)
+        group.start()
 
 
 def launch_desktop_app() -> int:
