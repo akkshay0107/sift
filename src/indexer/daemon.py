@@ -38,7 +38,7 @@ class IndexerEventHandler(FileSystemEventHandler):
             logger.error("[Watchdog] Failed indexing %s: %s", path, e)
 
 
-def run_daemon():
+def configure_daemon_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -49,8 +49,11 @@ def run_daemon():
     for noisy in ("transformers", "qwen_vl_utils", "easyocr", "faster_whisper"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    logger.info("Performing initial scan of monitored directories...")
-    index_monitored_directories()
+
+def start_indexing_observer(*, perform_initial_scan: bool = True) -> Observer | None:
+    if perform_initial_scan:
+        logger.info("Performing initial scan of monitored directories...")
+        index_monitored_directories()
 
     observer = Observer()
     event_handler = IndexerEventHandler()
@@ -66,9 +69,18 @@ def run_daemon():
 
     if directories_watched == 0:
         logger.error("No valid directories to monitor. Exiting.")
-        return
+        return None
 
     observer.start()
+    return observer
+
+
+def run_daemon():
+    configure_daemon_logging()
+    observer = start_indexing_observer(perform_initial_scan=True)
+    if observer is None:
+        return
+
     try:
         while True:
             time.sleep(1)

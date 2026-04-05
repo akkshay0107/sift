@@ -25,6 +25,11 @@ def get_qwen_embedder() -> QwenEmbedder:
     return _qwen_embedder
 
 
+def preload_shared_models(*, qwen: bool = True) -> None:
+    if qwen:
+        get_qwen_embedder()
+
+
 def get_ocr_pipeline() -> OCREmbeddingPipeline:
     global _ocr_pipeline
     if _ocr_pipeline is None:

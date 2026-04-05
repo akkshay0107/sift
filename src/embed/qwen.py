@@ -20,6 +20,7 @@ Usage:
 import sys
 import os
 from pathlib import Path
+from threading import RLock
 from typing import Union
 
 import torch
@@ -93,6 +94,7 @@ class QwenEmbedder:
         
         if move_to_mps:
             self._embedder.model.to("mps")
+        self._lock = RLock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -121,7 +123,8 @@ class QwenEmbedder:
             L2-normalized embedding on CPU.
         """
         item = self._build_item(input, instruction)
-        embedding = self._embedder.process([item])           # shape [1, dim]
+        with self._lock:
+            embedding = self._embedder.process([item])           # shape [1, dim]
         return embedding.float().cpu()
 
     def embed_batch(
@@ -145,7 +148,8 @@ class QwenEmbedder:
             Row-wise L2-normalized embeddings on CPU.
         """
         items = [self._build_item(inp, instruction) for inp in inputs]
-        embeddings = self._embedder.process(items)           # shape [N, dim]
+        with self._lock:
+            embeddings = self._embedder.process(items)           # shape [N, dim]
         return embeddings.float().cpu()
 
     # ------------------------------------------------------------------

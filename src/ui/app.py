@@ -242,8 +242,9 @@ class EntityList(QFrame):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, *, show_on_start: bool = True) -> None:
         super().__init__()
+        self._show_on_start = show_on_start
         self.setWindowTitle("Query Memory")
         self.setWindowFlags(
             Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
@@ -272,7 +273,8 @@ class MainWindow(QMainWindow):
         close_shortcut = QShortcut(QKeySequence("Esc"), self)
         close_shortcut.activated.connect(self._hide_and_reset)
 
-        QTimer.singleShot(0, self.play_intro_animation)
+        if show_on_start:
+            QTimer.singleShot(0, self.play_intro_animation)
         self._start_global_hotkey()
 
     def _hide_and_reset(self) -> None:
@@ -296,6 +298,7 @@ class MainWindow(QMainWindow):
             self._hide_and_reset()
         else:
             self.show()
+            self.play_intro_animation()
             self._apply_macos_overlay()
             self.query_input.setFocus()
 
@@ -983,8 +986,12 @@ class MainWindow(QMainWindow):
         group.start()
 
 
-def launch_desktop_app() -> int:
+def launch_desktop_app(*, show_on_start: bool = True) -> int:
     app = QApplication.instance() or QApplication([])
-    window = MainWindow()
+    app.setQuitOnLastWindowClosed(False)
+    window = MainWindow(show_on_start=show_on_start)
+    app._main_window = window
     window.show()
+    if not show_on_start:
+        QTimer.singleShot(0, window.hide)
     return app.exec()

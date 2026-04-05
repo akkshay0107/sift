@@ -119,18 +119,24 @@ To perform a one-time indexing of files in your configured directories:
 uv run python -m src.indexer.run_indexer
 ```
 
-### Background Daemon
+### Unified Daemon
 
-To run the background daemon that automatically indexes new and modified files (and performs an initial scan on startup):
+To run the main daemon that performs the startup scan, watches for new/modified files, and keeps the desktop UI resident in a hidden state:
 
 ```bash
-uv run python -m src.indexer.daemon
+uv run python -m src.daemon
 ```
 
 To run the daemon persistently in the background (even after closing your terminal), use `nohup`:
 
 ```bash
-nohup uv run python -m src.indexer.daemon > daemon.log 2>&1 &
+nohup uv run python -m src.daemon > daemon.log 2>&1 &
+```
+
+If you only want the legacy indexing-only watcher without the UI process attached:
+
+```bash
+uv run python -m src.indexer.daemon
 ```
 
 ### Running Search
