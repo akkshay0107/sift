@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -125,6 +126,10 @@ class AudioEmbedder:
 
         # -- Projection head (512 → 2048) --
         self._projection = ProjectionHead(dropout=0.2).to(self.device)
+
+        if projection_path is None and os.path.exists("./scratch/checkpoints/latest_model.pt"):
+            projection_path = "./scratch/checkpoints/latest_model.pt"
+
         if projection_path is not None:
             state = torch.load(projection_path, map_location=self.device)
             # Support loading both raw state_dicts and nested checkpoints from train_loop.py
