@@ -104,7 +104,12 @@ class AudioEmbedder:
         dtype: torch.dtype = torch.float32,
     ) -> None:
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
         self.device = torch.device(device)
         self.dtype = dtype
 
@@ -119,7 +124,11 @@ class AudioEmbedder:
         self._projection = ProjectionHead(dropout=0.2).to(self.device)
         if projection_path is not None:
             state = torch.load(projection_path, map_location=self.device)
-            self._projection.load_state_dict(state)
+            # Support loading both raw state_dicts and nested checkpoints from train_loop.py
+            if "proj_head_state_dict" in state:
+                self._projection.load_state_dict(state["proj_head_state_dict"])
+            else:
+                self._projection.load_state_dict(state)
         self._projection.eval()
 
     def embed(
