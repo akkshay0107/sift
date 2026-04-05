@@ -14,12 +14,13 @@ from PySide6.QtCore import (
     QParallelAnimationGroup,
     QPropertyAnimation,
     QRect,
+    QRectF,
     Qt,
     QTimer,
     QObject,
     Signal,
 )
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QPainterPath, QRegion, QShortcut
 from pynput import keyboard
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -44,17 +45,17 @@ from src.search import SearchResult, search_similar
 
 
 # Dev-facing theme knob.
-ACCENT_COLOR = "#e665bd"
-BOUNDARY_COLOR = "rgba(230, 101, 189, 0.55)"
-BOUNDARY_COLOR_STRONG = "rgba(230, 101, 189, 0.75)"
+ACCENT_COLOR = "#5a8fd6"
+BOUNDARY_COLOR = "rgba(90, 143, 214, 0.55)"
+BOUNDARY_COLOR_STRONG = "rgba(90, 143, 214, 0.75)"
 ACCENT_TAN = "#b8968f"
 PANEL_BG = "#171515"
 SURFACE_BG = "#0b0b0b"
 TEXT_PRIMARY = "#f3eee8"
-TEXT_MUTED = "#9d847c"
+TEXT_MUTED = "#8792a1"
 GRID_LINE = "#2c2a2a"
-ACCENT_SOFT = "rgba(230, 101, 189, 0.18)"
-ACCENT_FAINT = "rgba(230, 101, 189, 0.10)"
+ACCENT_SOFT = "rgba(90, 143, 214, 0.18)"
+ACCENT_FAINT = "rgba(90, 143, 214, 0.10)"
 UI_FONT_FAMILY = "Funnel Display"
 UI_FONT_FILE: str | None = str(
     Path(__file__).parent.parent.parent
@@ -90,11 +91,12 @@ class MemoryPanel(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("memoryPanel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self._open_handler = open_handler
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(14)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
 
         self.title_label = QLabel(title)
         self.title_label.setObjectName("panelTitle")
@@ -111,6 +113,7 @@ class MemoryPanel(QFrame):
         self.list_widget.setFocusPolicy(Qt.StrongFocus)
         self.list_widget.setCursor(Qt.PointingHandCursor)
         self.list_widget.viewport().setCursor(Qt.PointingHandCursor)
+        self.list_widget.viewport().setAutoFillBackground(False)
         self.list_widget.itemDoubleClicked.connect(self._handle_item_clicked)
         self.list_widget.itemActivated.connect(self._handle_item_clicked)
         layout.addWidget(self.list_widget, 1)
@@ -118,6 +121,7 @@ class MemoryPanel(QFrame):
         self.footer_label = QLabel("")
         self.footer_label.setObjectName("panelFooter")
         layout.addWidget(self.footer_label)
+
 
     def set_items(self, items: list[str], *, highlight_index: int = 0) -> None:
         self.list_widget.clear()
@@ -128,9 +132,9 @@ class MemoryPanel(QFrame):
 
     def set_bundle(self, bundle: SearchBundle | None) -> None:
         if bundle is None:
-            self.title_label.setText("NO BUNDLE")
-            self.set_items(["No Matching Bundle Found"])
-            self.footer_label.setText("0 FILES")
+            self.title_label.setText("No bundle")
+            self.set_items(["No matching bundle found"])
+            self.footer_label.setText("0 files")
             return
 
         self.list_widget.clear()
@@ -165,7 +169,7 @@ class MemoryPanel(QFrame):
 
         file_count = len(seen)
         self.footer_label.setText(
-            f"{file_count} FILE{'S' if file_count != 1 else ''}  SCORE {bundle.score:.3f}"
+            f"{file_count} file{'s' if file_count != 1 else ''}"
         )
 
     def _handle_item_clicked(self, item: QListWidgetItem) -> None:
@@ -191,6 +195,7 @@ class EntityList(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("entityPanel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self._open_handler = open_handler
 
         layout = QVBoxLayout(self)
@@ -202,9 +207,9 @@ class EntityList(QFrame):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(14, 12, 14, 12)
 
-        self.title_label = QLabel("RECOGNIZED_ENTITIES")
+        self.title_label = QLabel("Source Files")
         self.title_label.setObjectName("entityHeaderTitle")
-        self.filter_label = QLabel("FILTER: ALL")
+        self.filter_label = QLabel("All results")
         self.filter_label.setObjectName("entityHeaderFilter")
 
         header_layout.addWidget(self.title_label)
@@ -223,9 +228,17 @@ class EntityList(QFrame):
         self.list_widget.setFocusPolicy(Qt.StrongFocus)
         self.list_widget.setCursor(Qt.PointingHandCursor)
         self.list_widget.viewport().setCursor(Qt.PointingHandCursor)
+        self.list_widget.viewport().setAutoFillBackground(False)
         self.list_widget.itemDoubleClicked.connect(self._handle_item_clicked)
         self.list_widget.itemActivated.connect(self._handle_item_clicked)
         layout.addWidget(self.list_widget, 1)
+
+        # Footer bar — acts as a visual buffer between scrollable list and
+        # the rounded bottom corners, identical to the MemoryPanel footer.
+        self.footer_bar = QFrame()
+        self.footer_bar.setObjectName("entityFooter")
+        self.footer_bar.setFixedHeight(24)
+        layout.addWidget(self.footer_bar)
 
     def set_rows(self, rows: list[EntityRow]) -> None:
         self.list_widget.clear()
@@ -251,14 +264,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Query Memory")
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.resize(1360, 900)
-        self.setMinimumSize(1100, 760)
+        self.resize(1020, 900)
+        self.setMinimumSize(820, 760)
 
         # Center horizontally native to PySide
         if QApplication.primaryScreen():
-            screen_geo = QApplication.primaryScreen().geometry()
-            x = (screen_geo.width() - self.width()) // 2
-            self.move(x, self.y())
+            screen_geo = QApplication.primaryScreen().availableGeometry()
+            x = screen_geo.x() + (screen_geo.width() - self.width()) // 2
+            self.move(x, screen_geo.top())
 
         self._results: list[SearchResult] = []
         self._bundle_panels: list[MemoryPanel] = []
@@ -278,7 +291,6 @@ class MainWindow(QMainWindow):
 
     def _hide_and_reset(self) -> None:
         self.hide()
-        self.query_input.clear()
 
     def _start_global_hotkey(self) -> None:
         self._hotkey_signaler = HotkeySignaler()
@@ -287,7 +299,7 @@ class MainWindow(QMainWindow):
         def on_activate():
             self._hotkey_signaler.triggered.emit()
 
-        self._listener = keyboard.GlobalHotKeys({"<alt>+<space>": on_activate})
+        self._listener = keyboard.GlobalHotKeys({"<ctrl>+<space>": on_activate})
         self._listener.start()
 
     def _toggle_visibility(self) -> None:
@@ -296,9 +308,10 @@ class MainWindow(QMainWindow):
         else:
             self.show()
             self.play_intro_animation()
+            if self._results_visible:
+                self.play_results_animation()
             self._apply_macos_overlay()
             self.query_input.setFocus()
-
     def showEvent(self, event) -> None:
         super().showEvent(event)
         QTimer.singleShot(80, self._apply_macos_overlay)
@@ -344,13 +357,13 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         page_layout = QVBoxLayout(root)
-        page_layout.setContentsMargins(0, 18, 0, 40)
+        page_layout.setContentsMargins(0, 0, 0, 40)
         page_layout.setSpacing(10)
         self.page_layout = page_layout
 
         self.content_column = QWidget()
-        self.content_column.setMinimumWidth(1240)
-        self.content_column.setMaximumWidth(1240)
+        self.content_column.setMinimumWidth(930)
+        self.content_column.setMaximumWidth(930)
         page_layout.addWidget(self.content_column, 0, Qt.AlignTop | Qt.AlignHCenter)
 
         content_layout = QVBoxLayout(self.content_column)
@@ -383,7 +396,7 @@ class MainWindow(QMainWindow):
         header.setObjectName("header")
 
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(30, 28, 30, 28)
+        layout.setContentsMargins(22, 10, 22, 10)
         layout.setSpacing(18)
 
         icon = QLabel("⌕")
@@ -392,12 +405,12 @@ class MainWindow(QMainWindow):
 
         self.query_input = QLineEdit()
         self.query_input.setObjectName("queryInput")
-        self.query_input.setPlaceholderText("QUERY MEMORY")
+        self.query_input.setPlaceholderText("Search memory...")
         self.query_input.returnPressed.connect(self.run_search)
         self.query_input.installEventFilter(self)
         layout.addWidget(self.query_input, 1)
 
-        self.cancel_label = QLabel("ESC TO CANCEL")
+        self.cancel_label = QLabel("esc")
         self.cancel_label.setObjectName("cancelLabel")
         layout.addWidget(self.cancel_label)
 
@@ -452,138 +465,148 @@ class MainWindow(QMainWindow):
                 border: none;
             }}
             #header {{
-                background: #0f0f0f;
-                border: 3px solid {BOUNDARY_COLOR_STRONG};
+                background: #0d0d0d;
+                border: 1.5px solid {BOUNDARY_COLOR};
+                border-top: none;
                 border-top-left-radius: 0px;
                 border-top-right-radius: 0px;
-                border-bottom-left-radius: 22px;
-                border-bottom-right-radius: 22px;
+                border-bottom-left-radius: 16px;
+                border-bottom-right-radius: 16px;
             }}
             #searchIcon {{
                 color: {ACCENT_COLOR};
                 font-family: "{font_family}";
-                font-size: 34px;
-                font-weight: 700;
+                font-size: 26px;
+                font-weight: 600;
             }}
             #queryInput {{
                 background: transparent;
                 border: none;
-                border-right: 4px solid {ACCENT_COLOR};
                 color: {TEXT_PRIMARY};
                 font-family: "{font_family}";
-                font-size: 28px;
-                font-weight: 500;
-                padding: 8px 12px 8px 0;
+                font-size: 22px;
+                font-weight: 400;
+                padding: 6px 8px 6px 0;
             }}
             #queryInput::placeholder {{
-                color: {TEXT_PRIMARY};
+                color: {TEXT_MUTED};
                 font-family: "{font_family}";
             }}
             #cancelLabel {{
-                color: #5d4d49;
+                color: #3d3d3d;
                 font-family: "{font_family}";
-                font-size: 16px;
-                letter-spacing: 2px;
+                font-size: 13px;
+                letter-spacing: 1px;
             }}
             #topPanels {{
                 background: transparent;
                 border: none;
             }}
-            #memoryPanel, #entityPanel {{
-                background: {PANEL_BG};
-                border: 2px solid {BOUNDARY_COLOR};
-                border-top-left-radius: 22px;
-                border-top-right-radius: 22px;
-                border-bottom-left-radius: 22px;
-                border-bottom-right-radius: 22px;
+            #memoryPanel {{
+                background: #0f0f0f;
+                border: 1.5px solid {BOUNDARY_COLOR};
+                border-radius: 14px;
+            }}
+            #entityPanel {{
+                background: #0f0f0f;
+                border: 1.5px solid {BOUNDARY_COLOR};
+                border-radius: 14px;
             }}
             #panelTitle {{
-                color: {TEXT_PRIMARY};
+                color: {TEXT_MUTED};
                 font-family: "{font_family}";
-                font-size: 18px;
-                font-weight: 700;
+                font-size: 11px;
+                font-weight: 600;
                 letter-spacing: 2px;
             }}
             #panelList {{
                 background: transparent;
                 color: {TEXT_PRIMARY};
                 font-family: "{font_family}";
-                font-size: 16px;
+                font-size: 14px;
                 outline: none;
+                border-radius: 0px;
             }}
             #panelList::item {{
-                padding: 8px 6px;
+                padding: 7px 4px;
                 border: none;
+                border-radius: 6px;
             }}
             #panelList::item:selected {{
                 background: {ACCENT_FAINT};
-                border: none;
+                color: {ACCENT_COLOR};
             }}
             #panelList::item:hover {{
-                background: rgba(255, 255, 255, 0.04);
+                background: rgba(255, 255, 255, 0.03);
             }}
             QScrollBar:vertical {{
                 background: transparent;
-                width: 10px;
-                margin: 4px 2px 4px 2px;
+                width: 6px;
+                margin: 2px 1px 2px 1px;
             }}
             QScrollBar::handle:vertical {{
-                background: rgba(255, 20, 147, 0.7);
-                min-height: 36px;
-                border-radius: 4px;
+                background: rgba(90, 143, 214, 0.4);
+                min-height: 24px;
+                border-radius: 3px;
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
             }}
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
-                background: rgba(255, 255, 255, 0.05);
-                border-radius: 4px;
+                background: transparent;
             }}
             #panelFooter {{
-                color: {ACCENT_COLOR};
+                color: {TEXT_MUTED};
                 font-family: "{font_family}";
-                font-size: 15px;
-                font-weight: 700;
-                border-top: 1px solid #3a3434;
-                padding-top: 12px;
+                font-size: 12px;
+                font-weight: 500;
+                border-top: 1px solid #222222;
+                padding-top: 8px;
             }}
             #entityHeader {{
-                background: #0f0f0f;
-                border-top-left-radius: 19px;
-                border-top-right-radius: 19px;
-                border-bottom: 1px solid {BOUNDARY_COLOR};
+                background: #0d0d0d;
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+                border-bottom: 1px solid #1e1e1e;
             }}
             #entityHeaderTitle {{
-                color: {ACCENT_COLOR};
+                color: {TEXT_PRIMARY};
                 font-family: "{font_family}";
-                font-size: 16px;
-                font-weight: 700;
-                letter-spacing: 3px;
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
             }}
             #entityHeaderFilter {{
                 color: {TEXT_MUTED};
                 font-family: "{font_family}";
-                font-size: 15px;
+                font-size: 12px;
             }}
             #entityList {{
-                background: #101010;
+                background: transparent;
                 color: {TEXT_PRIMARY};
                 font-family: "{font_family}";
-                font-size: 16px;
+                font-size: 14px;
                 outline: none;
-                border-bottom-left-radius: 19px;
-                border-bottom-right-radius: 19px;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
             }}
             #entityList::item {{
-                padding: 20px 18px;
-                border-bottom: 1px solid #2f2929;
+                padding: 12px 14px;
+                border-bottom: 1px solid #1a1a1a;
+                border-radius: 0px;
             }}
             #entityList::item:selected {{
                 background: {ACCENT_FAINT};
-                border: none;
+                color: {ACCENT_COLOR};
             }}
             #entityList::item:hover {{
-                background: rgba(255, 255, 255, 0.04);
+                background: rgba(255, 255, 255, 0.03);
+            }}
+            #entityFooter {{
+                background: #0f0f0f;
+                border-top: 1px solid #1e1e1e;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
             }}
             """
         )
@@ -630,7 +653,7 @@ class MainWindow(QMainWindow):
         panels = [self.files_panel, self.matches_panel, self.metadata_panel]
         for index, panel in enumerate(panels):
             panel.title_label.setText(
-                f"BUNDLE {index + 1}" if index < len(top_bundles) else "NO BUNDLE"
+                f"Bundle {index + 1}" if index < len(top_bundles) else "No bundle"
             )
             panel.set_bundle(top_bundles[index] if index < len(top_bundles) else None)
         if self._bundle_panels:
@@ -783,6 +806,14 @@ class MainWindow(QMainWindow):
     def eventFilter(self, watched: object, event: object) -> bool:
         if hasattr(event, "type") and event.type() == event.Type.KeyPress:
             key = event.key()
+            if key in {Qt.Key_Return, Qt.Key_Enter}:
+                if isinstance(watched, QListWidget):
+                    item = watched.currentItem()
+                    if item:
+                        source_path = item.data(Qt.UserRole)
+                        if isinstance(source_path, str) and source_path:
+                            self.open_source_file(source_path)
+                            return True
             if key in {Qt.Key_Left, Qt.Key_Right}:
                 direction = -1 if key == Qt.Key_Left else 1
                 if self._move_bundle_focus(watched, direction):
@@ -928,41 +959,8 @@ class MainWindow(QMainWindow):
         widget.setCurrentRow(safe_row, QItemSelectionModel.ClearAndSelect)
 
     def _apply_search_compact_mode(self) -> None:
-        self.content_column.setMinimumWidth(1160)
-        self.content_column.setMaximumWidth(1160)
-        header_layout = self.header.layout()
-        if isinstance(header_layout, QHBoxLayout):
-            header_layout.setContentsMargins(22, 16, 22, 16)
-            header_layout.setSpacing(14)
-
-        self.header.setMinimumHeight(0)
-        self.header.adjustSize()
-
-        self.query_input.setStyleSheet(
-            f"""
-            QLineEdit {{
-                background: transparent;
-                border: none;
-                border-right: 4px solid {ACCENT_COLOR};
-                color: {TEXT_PRIMARY};
-                font-family: "{self._font_family}";
-                font-size: 22px;
-                font-weight: 500;
-                padding: 6px 10px 6px 0;
-            }}
-            """
-        )
-        self.cancel_label.setStyleSheet(
-            """
-            QLabel {
-                color: #5d4d49;
-                font-family: "%s";
-                font-size: 14px;
-                letter-spacing: 2px;
-            }
-            """
-            % self._font_family
-        )
+        # Width stays the same; no font/size change between pre and post search
+        pass
 
     def _load_ui_font_family(self) -> str:
         candidate_paths: list[str] = []
