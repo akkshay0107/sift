@@ -8,7 +8,6 @@ from src.indexer.file_utils import compute_file_hash
 from src.indexer.pipelines import (
     build_audio_record,
     build_image_record,
-    build_metadata_record,
     build_ocr_text_record,
     build_text_record,
     build_transcript_text_record,
@@ -42,37 +41,22 @@ def index_file(path: Path) -> tuple[int, str]:
 
     pipeline_names = get_pipelines_for_file(path)
     all_records = []
-    metadata_modality: str | None = None
 
     for pipeline_name in pipeline_names:
         if pipeline_name == "text":
             all_records.extend(build_text_record(path))
-            metadata_modality = "text"
         elif pipeline_name == "image":
             all_records.extend(build_image_record(path))
-            if metadata_modality is None:
-                metadata_modality = "image"
         elif pipeline_name == "ocr_text":
             ocr_records = build_ocr_text_record(path)
             all_records.extend(ocr_records)
-            if ocr_records:
-                metadata_modality = "ocr_text"
         elif pipeline_name == "audio":
             all_records.extend(build_audio_record(path))
-            if metadata_modality is None:
-                metadata_modality = "audio"
         elif pipeline_name == "transcript_text":
             transcript_records = build_transcript_text_record(path)
             all_records.extend(transcript_records)
-            if transcript_records:
-                metadata_modality = "transcript_text"
         elif pipeline_name == "video":
             all_records.extend(build_video_record(path))
-            if metadata_modality is None:
-                metadata_modality = "video"
-
-    if pipeline_names and metadata_modality is not None:
-        all_records.extend(build_metadata_record(path, modality=metadata_modality))
 
     upsert_records(all_records)
     return len(all_records), "indexed"

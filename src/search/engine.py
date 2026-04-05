@@ -18,9 +18,7 @@ class FileSearchResult:
     score: float
 
 
-_QUERY_INSTRUCTION = (
-    "Instruct: Given a user query, retrieve the most relevant files.\nQuery: "
-)
+_QUERY_INSTRUCTION = "Represent the search query for finding relevant files."
 
 
 def search_similar(

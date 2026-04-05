@@ -69,6 +69,9 @@ def get_whisper_chain() -> WhisperChain:
     return _whisper_chain
 
 
+_DOC_INSTRUCTION = "Represent the document for retrieval."
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -107,51 +110,14 @@ def make_base_kwargs(path: Path) -> dict:
     }
 
 
-def build_metadata_text(path: Path, base: dict, modality: str) -> str:
-    return "\n".join(
-        [
-            f"filename: {path.stem}",
-            f"extension: {base['extension']}",
-            f"modality: {modality}",
-            "embedding family: metadata",
-            f"created at: {base['created_at']}",
-            f"updated at: {base['updated_at']}",
-        ]
-    )
-
-
-def build_metadata_record(path: Path, modality: str) -> list[EmbeddingRecord]:
-    base = make_base_kwargs(path)
-    source_file_id = base["source_file_id"]
-
-    metadata_text = build_metadata_text(path, base, modality)
-    embedder = get_qwen_embedder()
-    tensor = embedder.embed(metadata_text, instruction="")
-    vector = tensor.squeeze(0).tolist()
-
-    return [
-        EmbeddingRecord(
-            id=new_id(),
-            vector=vector,
-            modality=modality,
-            pipeline_name="qwen_metadata_text",
-            chunk_id=f"{source_file_id}:metadata:0",
-            chunk_index=0,
-            embedding_family="metadata",
-            extracted_text=metadata_text,
-            metadata={"is_metadata_embedding": True},
-            **base,
-        )
-    ]
-
-
 def build_text_record(path: Path) -> list[EmbeddingRecord]:
-    text = path.read_text(encoding="utf-8", errors="ignore").strip()
-    if not text:
+    body = path.read_text(encoding="utf-8", errors="ignore").strip()
+    if not body:
         return []
 
+    text = f"File: {path.name}\n\n{body}"
     embedder = get_qwen_embedder()
-    tensor = embedder.embed(text, instruction="")
+    tensor = embedder.embed(text, instruction=_DOC_INSTRUCTION)
     vector = tensor.squeeze(0).tolist()
 
     base = make_base_kwargs(path)
@@ -199,12 +165,15 @@ def build_image_record(path: Path) -> list[EmbeddingRecord]:
 
 def build_ocr_text_record(path: Path) -> list[EmbeddingRecord]:
     ocr = get_ocr_pipeline()
-    text, tensor = ocr.process(str(path), return_embedding=True)
+    raw_text = ocr.process(str(path), return_embedding=False)
 
-    text = text.strip()
-    if not text:
+    raw_text = raw_text.strip()
+    if not raw_text:
         return []
 
+    text = f"File: {path.name}\n\n{raw_text}"
+    embedder = get_qwen_embedder()
+    tensor = embedder.embed(text, instruction=_DOC_INSTRUCTION)
     vector = tensor.squeeze(0).tolist()
 
     base = make_base_kwargs(path)
@@ -269,12 +238,14 @@ def build_transcript_text_record(path: Path) -> list[EmbeddingRecord]:
     )
 
     whisper_chain = get_whisper_chain()
-    tensor = whisper_chain.embed(segment)
-    transcript = (segment.transcript or "").strip()
+    raw_transcript = whisper_chain.transcriber.transcribe(segment.data).strip()
 
-    if not transcript:
+    if not raw_transcript:
         return []
 
+    transcript = f"File: {path.name}\n\n{raw_transcript}"
+    embedder = get_qwen_embedder()
+    tensor = embedder.embed(transcript, instruction=_DOC_INSTRUCTION)
     vector = tensor.squeeze(0).tolist() if tensor.ndim > 1 else tensor.tolist()
 
     base = make_base_kwargs(path)

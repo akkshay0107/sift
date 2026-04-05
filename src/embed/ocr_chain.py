@@ -52,7 +52,10 @@ class OCREmbeddingPipeline:
             self.embedder = QwenEmbedder(**embedder_kwargs)
 
     def process(
-        self, image_path: str, return_embedding: bool = True
+        self,
+        image_path: str,
+        return_embedding: bool = True,
+        instruction: Optional[str] = None,
     ) -> Union[str, Tuple[str, torch.Tensor]]:
         """
         Executes the pipeline over an image.
@@ -60,6 +63,7 @@ class OCREmbeddingPipeline:
         Args:
             image_path: Path to the local image.
             return_embedding: If True, calls the embedding model. If False, skips model entirely.
+            instruction: Optional system instruction for the embedding model.
 
         Returns:
             If return_embedding is True: (extracted_text, embedding_tensor)
@@ -74,6 +78,6 @@ class OCREmbeddingPipeline:
 
         # Step 3: Embed the extracted text using Qwen
         # If the image was empty or had no text, we can still embed empty string or skip
-        tensor = self.embedder.embed(text)
+        tensor = self.embedder.embed(text, instruction=instruction)
 
         return text, tensor

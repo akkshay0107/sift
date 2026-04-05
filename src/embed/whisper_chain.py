@@ -59,7 +59,9 @@ class WhisperChain:
         self.qwen_embedder = qwen_embedder
 
     @torch.no_grad()
-    def embed(self, segment: AudioSegment) -> torch.Tensor:
+    def embed(
+        self, segment: AudioSegment, instruction: str | None = None
+    ) -> torch.Tensor:
         """
         Produce a single 2048-dim L2-normalised text embedding for *segment*
         by first transcribing its audio and then embedding the text.
@@ -68,6 +70,7 @@ class WhisperChain:
 
         Args:
             segment: ``AudioSegment`` with populated ``data``.
+            instruction: Optional system instruction for the embedding model.
 
         Returns:
             1-D ``torch.Tensor`` of shape ``(2048,)`` on CPU.
@@ -79,19 +82,24 @@ class WhisperChain:
         # If transcription is empty, we still embed the empty string to get a vector
         # in the Qwen space (or handle as preferred).
         text = segment.transcript if segment.transcript else ""
-        emb = self.qwen_embedder.embed(text, instruction="").squeeze(0)  # (2048,)
+        emb = self.qwen_embedder.embed(text, instruction=instruction).squeeze(
+            0
+        )  # (2048,)
         segment.text_embedding = emb
 
         return emb
 
     @torch.no_grad()
-    def embed_batch(self, segments: List[AudioSegment]) -> torch.Tensor:
+    def embed_batch(
+        self, segments: List[AudioSegment], instruction: str | None = None
+    ) -> torch.Tensor:
         """
         Produce text embeddings for a list of segments in a single pass.
         Populates transcript and text_embedding for each segment.
 
         Args:
             segments: List of ``AudioSegment`` objects.
+            instruction: Shared instruction override for all items in the batch.
 
         Returns:
             Tensor of shape ``(N, 2048)`` on CPU, one row per segment.
@@ -102,7 +110,9 @@ class WhisperChain:
 
         # 2. Batch Text Embedding
         texts = [s.transcript if s.transcript else "" for s in segments]
-        embeddings = self.qwen_embedder.embed_batch(texts)  # type: ignore
+        embeddings = self.qwen_embedder.embed_batch(
+            texts, instruction=instruction
+        )  # type: ignore
 
         for i, segment in enumerate(segments):
             segment.text_embedding = embeddings[i]
