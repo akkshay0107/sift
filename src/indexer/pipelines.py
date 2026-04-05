@@ -8,9 +8,8 @@ from src.embed.audio import AudioEmbedder, AudioSegment
 from src.embed.ocr_chain import OCREmbeddingPipeline
 from src.embed.qwen import QwenEmbedder
 from src.embed.whisper_chain import WhisperChain, WhisperTranscriber
-from src.indexer.file_utils import compute_file_hash, guess_mime_type, file_extension
+from src.indexer.file_utils import compute_file_hash, file_extension, guess_mime_type
 from src.indexer.schemas import EmbeddingRecord, new_id
-
 
 _qwen_embedder: QwenEmbedder | None = None
 _ocr_pipeline: OCREmbeddingPipeline | None = None
@@ -29,7 +28,9 @@ def get_qwen_embedder() -> QwenEmbedder:
 def get_ocr_pipeline() -> OCREmbeddingPipeline:
     global _ocr_pipeline
     if _ocr_pipeline is None:
-        _ocr_pipeline = OCREmbeddingPipeline()
+        # Pass the already-loaded shared embedder so the OCR pipeline does not
+        # instantiate a second copy of the 5 GB Qwen model.
+        _ocr_pipeline = OCREmbeddingPipeline(embedder=get_qwen_embedder())
     return _ocr_pipeline
 
 
@@ -44,7 +45,12 @@ def get_whisper_transcriber() -> WhisperTranscriber:
     global _whisper_transcriber
     if _whisper_transcriber is None:
         device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
-        _whisper_transcriber = WhisperTranscriber(device=device)
+        # turbo on dedicated GPU (~1.6G RAM usage)
+        # small on CPU (~460 MB, good accuracy) to avoid
+        # exhausting RAM when paired with the other models
+        # already in memory.
+        model_size = "turbo" if device == "cuda" else "small"
+        _whisper_transcriber = WhisperTranscriber(model_size=model_size, device=device)
     return _whisper_transcriber
 
 
@@ -237,7 +243,9 @@ def build_audio_record(path: Path) -> list[EmbeddingRecord]:
             extracted_text=None,
             metadata={
                 "sample_rate": sample_rate,
-                "duration_seconds": float(len(audio) / sample_rate) if sample_rate else None,
+                "duration_seconds": float(len(audio) / sample_rate)
+                if sample_rate
+                else None,
             },
             **base,
         )
@@ -284,6 +292,7 @@ def build_transcript_text_record(path: Path) -> list[EmbeddingRecord]:
             **base,
         )
     ]
+
 
 def build_video_record(path: Path) -> list[EmbeddingRecord]:
     embedder = get_qwen_embedder()
