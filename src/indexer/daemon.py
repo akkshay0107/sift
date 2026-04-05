@@ -1,11 +1,22 @@
+import logging
+import os
 import time
 from pathlib import Path
+
+# Suppress tqdm progress bars from Qwen and other third-party libraries.
+# tqdm bars write ANSI escape codes to stderr which corrupt plain log output
+# when the two streams interleave — subsequent log lines get overwritten or
+# swallowed entirely.  The daemon has no interactive UI so progress bars are
+# useless here.
+os.environ.setdefault("TQDM_DISABLE", "1")
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from src.indexer.config import MONITORED_DIRECTORIES
 from src.indexer.indexer import index_file, index_monitored_directories
+
+logger = logging.getLogger(__name__)
 
 
 class IndexerEventHandler(FileSystemEventHandler):
@@ -22,13 +33,23 @@ class IndexerEventHandler(FileSystemEventHandler):
         try:
             inserted, status = index_file(path)
             if status != "skipped_unchanged":
-                print(f"[Watchdog] Indexed {path} -> {inserted} record(s)")
+                logger.info("[Watchdog] Indexed %s -> %d record(s)", path, inserted)
         except Exception as e:
-            print(f"[Watchdog] Failed indexing {path}: {e}")
+            logger.error("[Watchdog] Failed indexing %s: %s", path, e)
 
 
 def run_daemon():
-    print("Performing initial scan of monitored directories...")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Silence noisy third-party loggers that clutter the daemon output.
+    for noisy in ("transformers", "qwen_vl_utils", "easyocr", "faster_whisper"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    logger.info("Performing initial scan of monitored directories...")
     index_monitored_directories()
 
     observer = Observer()
@@ -38,13 +59,13 @@ def run_daemon():
     for directory in MONITORED_DIRECTORIES:
         if directory.exists():
             observer.schedule(event_handler, str(directory), recursive=True)
-            print(f"Started monitoring: {directory}")
+            logger.info("Started monitoring: %s", directory)
             directories_watched += 1
         else:
-            print(f"Warning: Monitored directory does not exist: {directory}")
+            logger.warning("Monitored directory does not exist: %s", directory)
 
     if directories_watched == 0:
-        print("No valid directories to monitor. Exiting.")
+        logger.error("No valid directories to monitor. Exiting.")
         return
 
     observer.start()
@@ -52,7 +73,7 @@ def run_daemon():
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nStopping daemon...")
+        logger.info("Stopping daemon...")
         observer.stop()
     observer.join()
 

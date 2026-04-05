@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from src.indexer.config import MONITORED_DIRECTORIES
@@ -19,6 +20,8 @@ from src.indexer.qdrant_db import (
     upsert_records,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def index_file(path: Path) -> tuple[int, str]:
     current_content_hash = compute_file_hash(path)
@@ -34,7 +37,7 @@ def index_file(path: Path) -> tuple[int, str]:
         and existing_content_hash != current_content_hash
     ):
         deleted_count = delete_points_for_source_path(source_path)
-        print(f"Reindexing {path}: deleted {deleted_count} old record(s)")
+        logger.info("Reindexing %s: deleted %d old record(s)", path, deleted_count)
 
     pipeline_names = get_pipelines_for_file(path)
     all_records = []
@@ -83,10 +86,10 @@ def index_monitored_directories() -> None:
 
     for directory in MONITORED_DIRECTORIES:
         if not directory.exists():
-            print(f"Directory does not exist: {directory}")
+            logger.warning("Directory does not exist: %s", directory)
             continue
 
-        print(f"Indexing directory: {directory}")
+        logger.info("Indexing directory: %s", directory)
 
         for path in directory.rglob("*"):
             if not path.is_file():
@@ -99,16 +102,17 @@ def index_monitored_directories() -> None:
 
                 if status == "skipped_unchanged":
                     skipped_files += 1
-                    print(f"Skipped {path} -> unchanged")
+                    logger.debug("Skipped %s -> unchanged", path)
                 else:
                     total_records += inserted
-                    print(f"Indexed {path} -> {inserted} record(s)")
+                    logger.info("Indexed %s -> %d record(s)", path, inserted)
 
             except Exception as e:
-                print(f"Failed indexing {path}: {e}")
+                logger.error("Failed indexing %s: %s", path, e)
 
-    print(
-        f"Done. Total files scanned: {total_files}, "
-        f"records inserted: {total_records}, "
-        f"files skipped: {skipped_files}"
+    logger.info(
+        "Done. Total files scanned: %d, records inserted: %d, files skipped: %d",
+        total_files,
+        total_records,
+        skipped_files,
     )
