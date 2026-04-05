@@ -302,7 +302,7 @@ def train_projection_head(
 
     scheduler = CosineAnnealingLR(
         optimizer,
-        T_max=EPOCHS,
+        T_max=max(1, EPOCHS // 3),
         eta_min=0.0,
     )
 
@@ -395,7 +395,9 @@ def train_projection_head(
         }
 
         ckpt_path = Path(CHECKPOINT_DIR) / f"checkpoint_epoch_{epoch + 1:03d}.pt"
-        torch.save(checkpoint, ckpt_path)
+        if (epoch + 1) % 10 == 0:
+            torch.save(checkpoint, ckpt_path)
+            
         torch.save(checkpoint, latest_path)
 
         if avg_val_loss < best_val_loss:
@@ -404,7 +406,7 @@ def train_projection_head(
             torch.save(checkpoint, best_path)
             print(f"-> New best checkpoint saved: {best_path}")
 
-        print(f"-> Saved latest + epoch checkpoint(s) to {CHECKPOINT_DIR}\n")
+        print(f"-> Saved latest checkpoint to {CHECKPOINT_DIR} (Epoch backups every 10)\n")
 
 
 def run_pipeline():

@@ -1,0 +1,9 @@
+[00:00:00] Sanjay (CEO): Good morning, everyone. Thanks for joining our Q3 Financial Review. Let's dive right into the numbers for the quarter. Neel, over to you.
+
+[00:00:10] Neel (CFO): Thanks, Sanjay. As you can see on the first slide, our Q3 revenue hit a record forty-two million dollars, representing a steady fifteen percent year-over-year growth. This was primarily driven by our new enterprise SaaS tier.
+
+[00:00:25] Sanjay (CEO): Fantastic. And looking at slide two, our gross margins have also improved significantly, up to seventy-eight percent. Our continued optimizations in cloud infrastructure are really paying off.
+
+[00:00:38] Neel (CFO): Exactly. Moving to slide three, our customer acquisition cost dropped by twelve percent. The new marketing initiatives launched in August are proving to be highly capital-efficient. Looking ahead to Q4, our pipeline is the strongest it has ever been.
+
+[00:01:00] Sanjay (CEO): Agreed. Excellent work across all teams this quarter. Let's open it up for questions.
