@@ -5,7 +5,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from src.indexer.config import MONITORED_DIRECTORIES
-from src.indexer.indexer import index_file
+from src.indexer.indexer import index_file, index_monitored_directories
 
 
 class IndexerEventHandler(FileSystemEventHandler):
@@ -28,6 +28,9 @@ class IndexerEventHandler(FileSystemEventHandler):
 
 
 def run_daemon():
+    print("Performing initial scan of monitored directories...")
+    index_monitored_directories()
+
     observer = Observer()
     event_handler = IndexerEventHandler()
 

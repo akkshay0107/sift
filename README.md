@@ -113,10 +113,24 @@ sudo apt install -y libgl1 libegl1 libdbus-1-3 libxkbcommon-x11-0 \
 
 ### Indexing Files
 
-To index files in the `trusted/` directory:
+To perform a one-time indexing of files in your configured directories:
 
 ```bash
 uv run python -m src.indexer.run_indexer
+```
+
+### Background Daemon
+
+To run the background daemon that automatically indexes new and modified files (and performs an initial scan on startup):
+
+```bash
+uv run python -m src.indexer.daemon
+```
+
+To run the daemon persistently in the background (even after closing your terminal), use `nohup`:
+
+```bash
+nohup uv run python -m src.indexer.daemon > daemon.log 2>&1 &
 ```
 
 ### Running Search
