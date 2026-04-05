@@ -18,6 +18,11 @@ class FileSearchResult:
     score: float
 
 
+_QUERY_INSTRUCTION = (
+    "Instruct: Given a user query, retrieve the most relevant files.\nQuery: "
+)
+
+
 def search_similar(
     prompt: str,
     k: int = 5,
@@ -34,7 +39,9 @@ def search_similar(
         raise ValueError("k must be greater than 0")
 
     embedder = get_qwen_embedder()
-    query_vector = embedder.embed(prompt).squeeze(0).tolist()
+    query_vector = (
+        embedder.embed(prompt, instruction=_QUERY_INSTRUCTION).squeeze(0).tolist()
+    )
 
     client = get_qdrant_client()
     response = client.query_points(

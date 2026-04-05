@@ -36,8 +36,15 @@ def audio_embedder():
 @pytest.fixture(scope="module")
 def sample_audio(sample_wav):
     if not sample_wav.exists():
-        pytest.skip(f"sample.wav not found at {sample_wav}")
+        pytest.skip(f"Audio file not found at {sample_wav}")
     return _load_wav(sample_wav)
+
+
+@pytest.fixture(scope="module")
+def noise_audio(test_noise):
+    if not test_noise.exists():
+        pytest.skip(f"Noise file not found at {test_noise}")
+    return _load_wav(test_noise)
 
 
 def test_audio_embedding_shape(audio_embedder, sample_audio):
@@ -52,6 +59,15 @@ def test_audio_embedding_shape(audio_embedder, sample_audio):
     assert emb.shape == (1, 2048)
     assert not torch.isnan(emb).any().item(), "Audio embedding contains NaNs"
     assert not torch.isinf(emb).any().item(), "Audio embedding contains Infs"
+
+
+def test_noise_embedding_shape(audio_embedder, noise_audio):
+    waveform, sample_rate = noise_audio
+    emb = audio_embedder.embed(waveform, sample_rate)
+
+    print(f"\nNoise Embedding: {emb}")
+    assert emb.shape == (1, 2048)
+    assert not torch.isnan(emb).any().item()
 
 
 def test_audio_embedding_dtype(audio_embedder, sample_audio):

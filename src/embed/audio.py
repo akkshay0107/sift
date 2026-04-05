@@ -127,7 +127,9 @@ class AudioEmbedder:
         # -- Projection head (512 → 2048) --
         self._projection = ProjectionHead(dropout=0.2).to(self.device)
 
-        if projection_path is None and os.path.exists("./scratch/checkpoints/latest_model.pt"):
+        if projection_path is None and os.path.exists(
+            "./scratch/checkpoints/latest_model.pt"
+        ):
             projection_path = "./scratch/checkpoints/latest_model.pt"
 
         if projection_path is not None:

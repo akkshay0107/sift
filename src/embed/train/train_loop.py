@@ -339,7 +339,9 @@ def train_projection_head(
                 if isinstance(checkpoint["logit_scale"], torch.Tensor):
                     logit_scale.copy_(checkpoint["logit_scale"].to(device))
                 else:
-                    logit_scale.copy_(torch.tensor(checkpoint["logit_scale"], device=device))
+                    logit_scale.copy_(
+                        torch.tensor(checkpoint["logit_scale"], device=device)
+                    )
         clamp_logit_scale_(logit_scale, MIN_TEMP, MAX_TEMP)
 
         start_epoch = checkpoint["epoch"] + 1
@@ -427,7 +429,9 @@ def train_projection_head(
                 print(f"-> Early stopping triggered at epoch {epoch + 1}")
                 break
 
-        print(f"-> Saved latest checkpoint to {CHECKPOINT_DIR} (Epoch backups every 10)\n")
+        print(
+            f"-> Saved latest checkpoint to {CHECKPOINT_DIR} (Epoch backups every 10)\n"
+        )
 
 
 def run_pipeline():

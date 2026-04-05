@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 import numpy as np
@@ -21,6 +22,7 @@ class SearchBundle:
     views: list[SearchResult]
     source_files: list[str]
     explanation: str
+    centroid: list[float] = field(default_factory=list)
 
 
 def parse_iso_time(time_str: str) -> datetime:
@@ -41,8 +43,8 @@ def calculate_temporal_similarity(t1_str: str, t2_str: str) -> float:
     t2 = parse_iso_time(t2_str)
 
     diff_seconds = abs((t1 - t2).total_seconds())
-    # 1 day = 86400 seconds. Scale linearly from 1.0 at 0s diff to 0.0 at 1 day diff
-    max_diff = 86400.0
+    # 7 days = 7 * 86400 seconds. Scale linearly from 1.0 at 0s diff to 0.0 at 7 days diff
+    max_diff = 7 * 86400.0
     sim = max(0.0, 1.0 - (diff_seconds / max_diff))
     return sim
 
@@ -50,17 +52,14 @@ def calculate_temporal_similarity(t1_str: str, t2_str: str) -> float:
 def calculate_name_similarity(name1: str, name2: str) -> float:
     if not name1 or not name2:
         return 0.0
-    name1 = name1.lower()
-    name2 = name2.lower()
-    if name1 == name2:
-        return 1.0
-
-    # basic similarity using Jaccard on characters
-    set1 = set(name1)
-    set2 = set(name2)
-    intersection = len(set1.intersection(set2))
-    union = len(set1.union(set2))
-    return intersection / union if union > 0 else 0.0
+    # Strip extension, split on word boundaries
+    stem1 = re.split(r"\.[^.]+$", name1.lower())[0]
+    stem2 = re.split(r"\.[^.]+$", name2.lower())[0]
+    t1 = set(re.split(r"[_\-\s]+", stem1)) - {""}
+    t2 = set(re.split(r"[_\-\s]+", stem2)) - {""}
+    if not t1 or not t2:
+        return 0.0
+    return len(t1 & t2) / len(t1 | t2)
 
 
 def calculate_embedding_similarity(
@@ -95,16 +94,19 @@ def calculate_embedding_similarity(
     return float(np.dot(vec1, vec2) / (norm1 * norm2))
 
 
-def item_belongs_in_bundle(
-    item: SearchResult, bundle: SearchBundle, grouping_threshold: float = 0.6
-) -> bool:
-    top_view = bundle.views[0]
+def _combined_score(item: SearchResult, bundle: SearchBundle) -> float:
+    # Use centroid if available, else fallback to first view (Fix 4)
+    ref_vector = (
+        bundle.centroid
+        if bundle.centroid
+        else (bundle.views[0].vector if bundle.views else None)
+    )
+    embed_sim = calculate_embedding_similarity(item.vector, ref_vector)
 
     item_payload = item.payload or {}
-    bundle_payload = top_view.payload or {}
-
-    # 1. Embedding Similarity
-    embed_sim = calculate_embedding_similarity(item.vector, top_view.vector)
+    # Use top_view for other similarities as they are metadata-based
+    top_view = bundle.views[0] if bundle.views else None
+    bundle_payload = top_view.payload if top_view else {}
 
     # 2. Temporal Similarity
     item_time = item_payload.get("updated_at") or item_payload.get("created_at") or ""
@@ -118,10 +120,36 @@ def item_belongs_in_bundle(
     bundle_name = bundle_payload.get("file_name", "")
     name_sim = calculate_name_similarity(item_name, bundle_name)
 
-    # Sensible defaults for weights
-    combined_score = (0.7 * embed_sim) + (0.2 * time_sim) + (0.1 * name_sim)
+    return (0.7 * embed_sim) + (0.2 * time_sim) + (0.1 * name_sim)
 
-    return combined_score >= grouping_threshold
+
+def item_belongs_in_bundle(
+    item: SearchResult, bundle: SearchBundle, grouping_threshold: float = 0.6
+) -> bool:
+    return _combined_score(item, bundle) >= grouping_threshold
+
+
+def _add_item_to_bundle(item: SearchResult, bundle: SearchBundle) -> None:
+    # Incremental mean: new_centroid = (old_centroid * n + new_vec) / (n + 1)
+    n = len(bundle.views)
+    if item.vector:
+        # Normalize vector to list if it's a dict (though SearchResult.vector is usually the list)
+        if isinstance(item.vector, dict):
+            item_vec_list = list(item.vector.values())[0] if item.vector else []
+        else:
+            item_vec_list = item.vector
+
+        if not bundle.centroid:
+            bundle.centroid = list(item_vec_list)
+        else:
+            bundle.centroid = [
+                (c * n + v) / (n + 1) for c, v in zip(bundle.centroid, item_vec_list)
+            ]
+
+    bundle.views.append(item)
+    source_path = item.payload.get("source_path") if item.payload else None
+    if source_path and source_path not in bundle.source_files:
+        bundle.source_files.append(source_path)
 
 
 def build_bundles(
@@ -139,19 +167,20 @@ def build_bundles(
 
     bundles: list[SearchBundle] = []
 
+    def _get_best_bundle(item: SearchResult) -> tuple[SearchBundle | None, float]:
+        best_b, best_score = None, -1.0
+        for bundle in bundles:
+            score = _combined_score(item, bundle)
+            if score >= grouping_threshold and score > best_score:
+                best_b, best_score = bundle, score
+        return best_b, best_score
+
     # 3. Process seeds: they can create new bundles or merge into existing ones
     for item in seeds:
-        placed = False
-        for bundle in bundles:
-            if item_belongs_in_bundle(item, bundle, grouping_threshold):
-                bundle.views.append(item)
-                source_path = item.payload.get("source_path") if item.payload else None
-                if source_path and source_path not in bundle.source_files:
-                    bundle.source_files.append(source_path)
-                placed = True
-                break
-
-        if not placed:
+        best_bundle, _ = _get_best_bundle(item)
+        if best_bundle:
+            _add_item_to_bundle(item, best_bundle)
+        else:
             source_path = item.payload.get("source_path") if item.payload else None
             title = item.payload.get("file_name") if item.payload else None
             if not title:
@@ -161,6 +190,14 @@ def build_bundles(
                     else f"Bundle {len(bundles) + 1}"
                 )
 
+            # Convert vector if it's a dict for centroid
+            centroid = []
+            if item.vector:
+                if isinstance(item.vector, dict):
+                    centroid = list(item.vector.values())[0] if item.vector else []
+                else:
+                    centroid = list(item.vector)
+
             bundles.append(
                 SearchBundle(
                     bundle_id=str(item.id),
@@ -169,23 +206,15 @@ def build_bundles(
                     views=[item],
                     source_files=[source_path] if source_path else [],
                     explanation="Grouped by similarity of content and metadata",
+                    centroid=centroid,
                 )
             )
 
     # 4. Process others: they can ONLY merge into existing bundles, never create new ones
     for item in others:
-        best_bundle = None
-        # We find the best matching bundle instead of just the first one for 'others'
-        # to ensure better quality grouping for these lower-score items.
-        # But for simplicity and consistency with seeds, we can just use the first match
-        # as item_belongs_in_bundle already checks the threshold.
-        for bundle in bundles:
-            if item_belongs_in_bundle(item, bundle, grouping_threshold):
-                bundle.views.append(item)
-                source_path = item.payload.get("source_path") if item.payload else None
-                if source_path and source_path not in bundle.source_files:
-                    bundle.source_files.append(source_path)
-                break
+        best_bundle, _ = _get_best_bundle(item)
+        if best_bundle:
+            _add_item_to_bundle(item, best_bundle)
 
     # 5. Finalize bundles
     for bundle in bundles:

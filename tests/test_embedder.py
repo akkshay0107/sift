@@ -25,7 +25,9 @@ def test_text_embedding_shape_and_similarity(embedder):
     assert emb1.shape == (1, 2048)
 
     # 1b. Debug/Stability Checks (Ensure float16 didn't overflow to NaN/Inf)
-    assert not torch.isnan(emb1).any().item(), "Qwen text embedding contains NaNs (likely float16 overflow)"
+    assert not torch.isnan(emb1).any().item(), (
+        "Qwen text embedding contains NaNs (likely float16 overflow)"
+    )
     assert not torch.isinf(emb1).any().item(), "Qwen text embedding contains Infs"
     assert not torch.isnan(emb2).any().item(), "Qwen text embedding contains NaNs"
     assert not torch.isnan(emb3).any().item(), "Qwen text embedding contains NaNs"
@@ -37,6 +39,19 @@ def test_text_embedding_shape_and_similarity(embedder):
     assert sim_similar > sim_different
     assert sim_similar > 0.4
     assert sim_different < 0.2
+
+
+def test_embedding_from_file(embedder, test_txt):
+    """Verifies that reading text from a file and embedding it works."""
+    if not test_txt.exists():
+        pytest.skip(f"Test text file not found at {test_txt}")
+
+    with open(test_txt, "r") as f:
+        text = f.read()
+
+    emb = embedder.embed(text[:1000])  # Use a snippet
+    assert emb.shape == (1, 2048)
+    assert not torch.isnan(emb).any().item()
 
 
 def test_image_embedding_shape(embedder, test_png):

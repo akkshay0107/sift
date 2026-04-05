@@ -113,7 +113,7 @@ def build_metadata_text(path: Path, base: dict, modality: str) -> str:
             f"filename: {path.stem}",
             f"extension: {base['extension']}",
             f"modality: {modality}",
-            f"embedding family: metadata",
+            "embedding family: metadata",
             f"created at: {base['created_at']}",
             f"updated at: {base['updated_at']}",
         ]
@@ -126,7 +126,7 @@ def build_metadata_record(path: Path, modality: str) -> list[EmbeddingRecord]:
 
     metadata_text = build_metadata_text(path, base, modality)
     embedder = get_qwen_embedder()
-    tensor = embedder.embed(metadata_text)
+    tensor = embedder.embed(metadata_text, instruction="")
     vector = tensor.squeeze(0).tolist()
 
     return [
@@ -151,7 +151,7 @@ def build_text_record(path: Path) -> list[EmbeddingRecord]:
         return []
 
     embedder = get_qwen_embedder()
-    tensor = embedder.embed(text)
+    tensor = embedder.embed(text, instruction="")
     vector = tensor.squeeze(0).tolist()
 
     base = make_base_kwargs(path)
@@ -175,7 +175,7 @@ def build_text_record(path: Path) -> list[EmbeddingRecord]:
 
 def build_image_record(path: Path) -> list[EmbeddingRecord]:
     embedder = get_qwen_embedder()
-    tensor = embedder.embed(str(path))
+    tensor = embedder.embed(str(path), instruction="")
     vector = tensor.squeeze(0).tolist()
 
     base = make_base_kwargs(path)
@@ -301,7 +301,7 @@ def build_transcript_text_record(path: Path) -> list[EmbeddingRecord]:
 
 def build_video_record(path: Path) -> list[EmbeddingRecord]:
     embedder = get_qwen_embedder()
-    tensor = embedder.embed(str(path))
+    tensor = embedder.embed(str(path), instruction="")
     vector = tensor.squeeze(0).tolist()
 
     base = make_base_kwargs(path)

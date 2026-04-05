@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from ctypes import c_void_p
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -17,11 +16,10 @@ from PySide6.QtCore import (
     QRect,
     Qt,
     QTimer,
-    QUrl,
     QObject,
     Signal,
 )
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut
 from pynput import keyboard
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -58,7 +56,12 @@ GRID_LINE = "#2c2a2a"
 ACCENT_SOFT = "rgba(230, 101, 189, 0.18)"
 ACCENT_FAINT = "rgba(230, 101, 189, 0.10)"
 UI_FONT_FAMILY = "Funnel Display"
-UI_FONT_FILE: str | None = str(Path(__file__).parent.parent.parent / "assets" / "fonts" / "FunnelDisplay-VariableFont_wght.ttf")
+UI_FONT_FILE: str | None = str(
+    Path(__file__).parent.parent.parent
+    / "assets"
+    / "fonts"
+    / "FunnelDisplay-VariableFont_wght.ttf"
+)
 UI_FONT_FALLBACKS = []
 
 
@@ -246,9 +249,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._show_on_start = show_on_start
         self.setWindowTitle("Query Memory")
-        self.setWindowFlags(
-            Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-        )
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.resize(1360, 900)
         self.setMinimumSize(1100, 760)
@@ -258,8 +259,6 @@ class MainWindow(QMainWindow):
             screen_geo = QApplication.primaryScreen().geometry()
             x = (screen_geo.width() - self.width()) // 2
             self.move(x, self.y())
-
-
 
         self._results: list[SearchResult] = []
         self._bundle_panels: list[MemoryPanel] = []
@@ -284,13 +283,11 @@ class MainWindow(QMainWindow):
     def _start_global_hotkey(self) -> None:
         self._hotkey_signaler = HotkeySignaler()
         self._hotkey_signaler.triggered.connect(self._toggle_visibility)
-        
+
         def on_activate():
             self._hotkey_signaler.triggered.emit()
 
-        self._listener = keyboard.GlobalHotKeys({
-            '<alt>+<space>': on_activate
-        })
+        self._listener = keyboard.GlobalHotKeys({"<alt>+<space>": on_activate})
         self._listener.start()
 
     def _toggle_visibility(self) -> None:
@@ -317,9 +314,13 @@ class MainWindow(QMainWindow):
             # Check trust and warn clearly instead of silently failing
             trusted = AS.AXIsProcessTrusted()
             if not trusted:
-                print("WARNING: Process not trusted — window cannot appear above fullscreen apps.")
-                print("Fix: System Settings → Privacy & Security → Accessibility → add Terminal")
-            
+                print(
+                    "WARNING: Process not trusted — window cannot appear above fullscreen apps."
+                )
+                print(
+                    "Fix: System Settings → Privacy & Security → Accessibility → add Terminal"
+                )
+
             # Promote the process to a foreground app so macOS lets it
             # take focus from fullscreen apps. Without this, on Sonoma,
             # a bare Python process is treated as background-only and
@@ -333,10 +334,10 @@ class MainWindow(QMainWindow):
                 ns_win.setLevel_(1000)
                 ns_win.makeKeyAndOrderFront_(None)
                 ns_win.orderFrontRegardless()
-                
+
             NSApp.activateIgnoringOtherApps_(True)
         except Exception as e:
-            print(f'OVERLAY ERROR: {e}')
+            print(f"OVERLAY ERROR: {e}")
 
     def _build_ui(self) -> None:
         root = GridBackgroundWidget()
@@ -413,9 +414,17 @@ class MainWindow(QMainWindow):
         layout.setVerticalSpacing(0)
 
         self.files_panel = MemoryPanel("FILES", open_handler=self.open_source_file)
-        self.matches_panel = MemoryPanel("TOP_MATCHES", open_handler=self.open_source_file)
-        self.metadata_panel = MemoryPanel("METADATA", open_handler=self.open_source_file)
-        self._bundle_panels = [self.files_panel, self.matches_panel, self.metadata_panel]
+        self.matches_panel = MemoryPanel(
+            "TOP_MATCHES", open_handler=self.open_source_file
+        )
+        self.metadata_panel = MemoryPanel(
+            "METADATA", open_handler=self.open_source_file
+        )
+        self._bundle_panels = [
+            self.files_panel,
+            self.matches_panel,
+            self.metadata_panel,
+        ]
 
         for panel in self._bundle_panels:
             panel.list_widget.installEventFilter(self)
@@ -620,26 +629,34 @@ class MainWindow(QMainWindow):
         top_bundles = bundles[:3]
         panels = [self.files_panel, self.matches_panel, self.metadata_panel]
         for index, panel in enumerate(panels):
-            panel.title_label.setText(f"BUNDLE {index + 1}" if index < len(top_bundles) else "NO BUNDLE")
+            panel.title_label.setText(
+                f"BUNDLE {index + 1}" if index < len(top_bundles) else "NO BUNDLE"
+            )
             panel.set_bundle(top_bundles[index] if index < len(top_bundles) else None)
         if self._bundle_panels:
             self._last_bundle_focus_index = 0
             self._focus_list_widget(self._bundle_panels[0].list_widget, 0)
 
         entity_rows = self._build_entity_rows(raw_matches)
-        self.entity_list.set_rows(entity_rows or [EntityRow("NO_RECOGNIZED_ENTITIES", "/", "")])
+        self.entity_list.set_rows(
+            entity_rows or [EntityRow("NO_RECOGNIZED_ENTITIES", "/", "")]
+        )
         self._clear_inactive_selection(except_widget=self._bundle_panels[0].list_widget)
 
     def open_source_file(self, source_path: str) -> None:
         target = self._resolve_source_path(source_path)
         if not target.exists():
-            QMessageBox.warning(self, "File not found", f"Could not find:\n{source_path}")
+            QMessageBox.warning(
+                self, "File not found", f"Could not find:\n{source_path}"
+            )
             return
 
         try:
             self._launch_path(target)
         except Exception as exc:
-            QMessageBox.critical(self, "Open failed", f"Could not open:\n{source_path}\n\n{exc}")
+            QMessageBox.critical(
+                self, "Open failed", f"Could not open:\n{source_path}\n\n{exc}"
+            )
 
     def _launch_path(self, target: Path) -> None:
         errors: list[str] = []
@@ -672,7 +689,10 @@ class MainWindow(QMainWindow):
                 ]
                 for command in wsl_commands:
                     executable = command[0]
-                    if executable not in {"/mnt/c/Windows/explorer.exe"} and shutil.which(executable) is None:
+                    if (
+                        executable not in {"/mnt/c/Windows/explorer.exe"}
+                        and shutil.which(executable) is None
+                    ):
                         errors.append(f"{executable} not found")
                         continue
                     try:
@@ -701,7 +721,9 @@ class MainWindow(QMainWindow):
         )
 
     def _is_wsl(self) -> bool:
-        return "microsoft" in platform.release().lower() or "WSL_DISTRO_NAME" in os.environ
+        return (
+            "microsoft" in platform.release().lower() or "WSL_DISTRO_NAME" in os.environ
+        )
 
     def _resolve_source_path(self, source_path: str) -> Path:
         raw = Path(source_path).expanduser()
@@ -716,7 +738,11 @@ class MainWindow(QMainWindow):
         return raw
 
     def _looks_like_windows_path(self, source_path: str) -> bool:
-        return len(source_path) > 2 and source_path[1] == ":" and source_path[2] in {"\\", "/"}
+        return (
+            len(source_path) > 2
+            and source_path[1] == ":"
+            and source_path[2] in {"\\", "/"}
+        )
 
     def _windows_to_wsl_path(self, source_path: str) -> Path:
         drive = source_path[0].lower()
@@ -761,7 +787,11 @@ class MainWindow(QMainWindow):
                 direction = -1 if key == Qt.Key_Left else 1
                 if self._move_bundle_focus(watched, direction):
                     return True
-            if key == Qt.Key_Down and watched is self.query_input and self._move_focus_from_search_to_bundles():
+            if (
+                key == Qt.Key_Down
+                and watched is self.query_input
+                and self._move_focus_from_search_to_bundles()
+            ):
                 return True
             if key == Qt.Key_Down and self._move_focus_to_entities(watched):
                 return True
@@ -782,7 +812,10 @@ class MainWindow(QMainWindow):
             return True
 
         self._last_bundle_focus_index = widgets.index(target_widget)
-        self._focus_list_widget(target_widget, target_widget.currentRow() if target_widget.currentRow() >= 0 else 0)
+        self._focus_list_widget(
+            target_widget,
+            target_widget.currentRow() if target_widget.currentRow() >= 0 else 0,
+        )
         return True
 
     def _move_focus_to_entities(self, watched: object) -> bool:
@@ -813,7 +846,9 @@ class MainWindow(QMainWindow):
             if fallback is None:
                 return False
             target_widget = fallback
-        target_index = [panel.list_widget for panel in self._bundle_panels].index(target_widget)
+        target_index = [panel.list_widget for panel in self._bundle_panels].index(
+            target_widget
+        )
         self._last_bundle_focus_index = target_index
         self._focus_list_widget(target_widget, 0)
         return True
@@ -857,12 +892,16 @@ class MainWindow(QMainWindow):
             if fallback is None:
                 return False
             target_widget = fallback
-            target_index = [panel.list_widget for panel in self._bundle_panels].index(target_widget)
+            target_index = [panel.list_widget for panel in self._bundle_panels].index(
+                target_widget
+            )
         self._last_bundle_focus_index = target_index
         self._focus_list_widget(target_widget, target_widget.count() - 1)
         return True
 
-    def _find_next_nonempty_bundle_widget(self, start_index: int, direction: int) -> QListWidget | None:
+    def _find_next_nonempty_bundle_widget(
+        self, start_index: int, direction: int
+    ) -> QListWidget | None:
         widgets = [panel.list_widget for panel in self._bundle_panels]
         target_index = start_index + direction
         while 0 <= target_index < len(widgets):
@@ -872,7 +911,9 @@ class MainWindow(QMainWindow):
         return None
 
     def _clear_inactive_selection(self, except_widget: QListWidget) -> None:
-        widgets = [panel.list_widget for panel in self._bundle_panels] + [self.entity_list.list_widget]
+        widgets = [panel.list_widget for panel in self._bundle_panels] + [
+            self.entity_list.list_widget
+        ]
         for widget in widgets:
             if widget is except_widget:
                 continue
@@ -919,7 +960,8 @@ class MainWindow(QMainWindow):
                 font-size: 14px;
                 letter-spacing: 2px;
             }
-            """ % self._font_family
+            """
+            % self._font_family
         )
 
     def _load_ui_font_family(self) -> str:

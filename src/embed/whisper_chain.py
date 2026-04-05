@@ -79,7 +79,7 @@ class WhisperChain:
         # If transcription is empty, we still embed the empty string to get a vector
         # in the Qwen space (or handle as preferred).
         text = segment.transcript if segment.transcript else ""
-        emb = self.qwen_embedder.embed(text).squeeze(0)  # (2048,)
+        emb = self.qwen_embedder.embed(text, instruction="").squeeze(0)  # (2048,)
         segment.text_embedding = emb
 
         return emb
