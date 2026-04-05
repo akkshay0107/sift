@@ -50,6 +50,8 @@ def test_audio_embedding_shape(audio_embedder, sample_audio):
     print(f"Norm:      {emb.norm().item():.6f}")
 
     assert emb.shape == (1, 2048)
+    assert not torch.isnan(emb).any().item(), "Audio embedding contains NaNs"
+    assert not torch.isinf(emb).any().item(), "Audio embedding contains Infs"
 
 
 def test_audio_embedding_dtype(audio_embedder, sample_audio):

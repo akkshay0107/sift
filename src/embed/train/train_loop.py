@@ -1,6 +1,7 @@
 import math
 import os
 import sys
+import gc
 from pathlib import Path
 
 # Add the project root to the PYTHONPATH so 'src' can be found
@@ -14,16 +15,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, Dataset, TensorDataset
-from tqdm import tqdm
 
-from src.embed.audio import AudioEmbedder
+from src.embed.audio import AudioEmbedder, ProjectionHead
 from src.embed.qwen import QwenEmbedder
 
 scratch_base = os.environ.get("RCAC_SCRATCH", "./scratch")
 CSV_PATH = os.environ.get("CSV_PATH", str(Path(scratch_base) / "engine" / "data" / "AudioSetCaps_caption_subset.csv"))
 AUDIO_DIR = os.environ.get("AUDIO_DIR", str(Path(scratch_base) / "engine" / "audio"))
 CHECKPOINT_DIR = os.environ.get("CHECKPOINT_DIR", str(Path(scratch_base) / "engine" / "checkpoints"))
-BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 128))
+
+PRECOMPUTE_BATCH_SIZE = int(os.environ.get("PRECOMPUTE_BATCH_SIZE", 8)) # Small batches for heavy models
+TRAIN_BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1024)) # Massive batches for gradient optimization
 EPOCHS = int(os.environ.get("EPOCHS", 50))
 LR = float(os.environ.get("LR", 1e-4))
 WEIGHT_DECAY = float(os.environ.get("WEIGHT_DECAY", 0.2))
@@ -76,30 +78,87 @@ def collate_fn(batch):
     return list(audios), list(texts)
 
 
-def train():
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+def load_dataset() -> AudioTextDataset:
+    """Step 1: Parse the CSV and load the valid subset into memory."""
+    print("Configuring Dataloader...")
+    dataset = AudioTextDataset(CSV_PATH, AUDIO_DIR)
+    
+    if len(dataset) == 0:
+        raise ValueError("CRITICAL: No valid dataset found to train on. Check directories. Exiting.")
         
-    print(f"Using compute device: {device}")
+    return dataset
 
+
+def precompute_embeddings(dataset: AudioTextDataset, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, ProjectionHead]:
+    """Step 2: Calculate embedding maps and wipe the foundation models from memory."""
+    print("Initializing Base Models...")
+    
+    qwen = QwenEmbedder()  
+    aligner = AudioEmbedder(device=device)
+
+    # Grab the Qwen dtype to use for the text/audio caching arrays later
+    cache_dtype = qwen._embedder.model.dtype 
+    
+    # Detach projection head to survive model deletion
+    proj_head = aligner.projection_head().float()
+    
+    num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 4 if torch.cuda.is_available() else 0))
+    pre_loader = DataLoader(
+        dataset,
+        batch_size=PRECOMPUTE_BATCH_SIZE,
+        shuffle=False,
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        pin_memory=torch.cuda.is_available(),
+    )
+    
+    all_text_embeds = []
+    all_clap_embeds = []
+
+    print("Precomputing Base Embeddings (This runs exactly ONCE)...")
+    for audios, texts in pre_loader:
+        with torch.no_grad():
+            text_emb = qwen.embed_batch(texts).to(device, dtype=cache_dtype)
+
+            inputs = aligner._processor(
+                audio=audios,
+                sampling_rate=aligner.CLAP_SAMPLE_RATE, # 48000
+                return_tensors="pt",
+                padding=True,
+            )
+            input_features = inputs["input_features"].to(device, dtype=aligner.dtype)
+
+            audio_outputs = aligner._audio_model(input_features=input_features)
+            clap_emb = aligner._audio_projection(audio_outputs.pooler_output)
+            clap_emb = F.normalize(clap_emb, p=2, dim=-1)
+
+            # Move to CPU RAM temporarily to save precious GPU VRAM
+            all_text_embeds.append(text_emb.cpu())
+            all_clap_embeds.append(clap_emb.cpu())
+            
+    tensor_text = torch.cat(all_text_embeds, dim=0)
+    tensor_clap = torch.cat(all_clap_embeds, dim=0)
+    
+    print(f"Precomputed Shapes - Audio: {tensor_clap.shape}, Text: {tensor_text.shape}")
+    
+    # Memory Cleanup: Free the massive models before the training loop
+    print("Precomputing complete! Purging Foundation Models from memory...")
+    del qwen
+    del aligner._audio_model
+    del aligner
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        
+    return tensor_clap, tensor_text, proj_head
+
+
+def train_projection_head(tensor_clap: torch.Tensor, tensor_text: torch.Tensor, proj_head: ProjectionHead, device: torch.device):
+    """Step 3: Train the Projection Head natively against the cached tensors."""
     Path(CHECKPOINT_DIR).mkdir(parents=True, exist_ok=True)
     print(f"Checkpoints will be managed in: {CHECKPOINT_DIR}")
 
-    print("Initializing Base Models...")
-    
-    # Safe float fallback for CPU/MPS locally, bfloat16 for CUDA
-    dtype = torch.float32 if device.type in ["cpu", "mps"] else torch.bfloat16
-        
-    qwen = QwenEmbedder(dtype=dtype)  
-    aligner = AudioEmbedder(device=device, dtype=dtype)
-
-    proj_head = aligner.projection_head()
     proj_head.train()
-
     logit_scale = nn.Parameter(torch.tensor(math.log(1 / 0.07), device=device))
 
     optimizer = torch.optim.AdamW(
@@ -128,106 +187,43 @@ def train():
     else:
         print("No prior checkpoint found. Beginning new training run.")
 
-    # Data Supply
-    num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 4 if torch.cuda.is_available() else 0))
-    print(f"Configuring Dataloader with {num_workers} parallel workers.")
-    dataset = AudioTextDataset(CSV_PATH, AUDIO_DIR)
-    
-    if len(dataset) == 0:
-        print("CRITICAL: No valid dataset found to train on. Check directories. Exiting.")
-        return
-
-    from torch.utils.data import TensorDataset
-
-    print("Precomputing Base Embeddings (This runs exactly ONCE)...")
-    pre_loader = DataLoader(
-        dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        collate_fn=collate_fn,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
-    )
-    
-    all_text_embeds = []
-    all_clap_embeds = []
-
-    for audios, texts in tqdm(pre_loader, desc="Precomputing Base Models"):
-        with torch.no_grad():
-            text_emb = qwen.embed_batch(texts).to(device, dtype=dtype)
-
-            inputs = aligner._processor(
-                audio=audios,
-                sampling_rate=aligner.CLAP_SAMPLE_RATE, # 48000
-                return_tensors="pt",
-                padding=True,
-            )
-            input_features = inputs["input_features"].to(device, dtype=dtype)
-
-            audio_outputs = aligner._audio_model(input_features=input_features)
-            clap_emb = aligner._audio_projection(audio_outputs.pooler_output)
-            clap_emb = F.normalize(clap_emb, p=2, dim=-1)
-
-            # Move to CPU RAM temporarily to save precious GPU VRAM
-            all_text_embeds.append(text_emb.cpu())
-            all_clap_embeds.append(clap_emb.cpu())
-            
-    tensor_text = torch.cat(all_text_embeds, dim=0)
-    tensor_clap = torch.cat(all_clap_embeds, dim=0)
-    
-    # Memory Cleanup: Free the massive models before the training loop
-    del qwen
-    del aligner._audio_model
-    import gc
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
     fast_dataset = TensorDataset(tensor_clap, tensor_text)
-    fast_loader = DataLoader(fast_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    fast_loader = DataLoader(fast_dataset, batch_size=TRAIN_BATCH_SIZE, shuffle=True)
 
-    print(f"Precomputed Shapes - Audio: {tensor_clap.shape}, Text: {tensor_text.shape}")
     print(f"Starting FAST Training Loop! Batches per epoch: {len(fast_loader)}")
 
     for epoch in range(start_epoch, EPOCHS):
         epoch_loss = 0.0
         current_lr = optimizer.param_groups[0]["lr"]
         
-        pbar = tqdm(fast_loader, desc=f"Epoch {epoch + 1}/{EPOCHS}")
-        for batch_clap, batch_text in pbar:
-            # Move precomputed batch directly to GPU
-            batch_clap = batch_clap.to(device, dtype=dtype)
-            batch_text = batch_text.to(device, dtype=dtype)
+        for batch_clap, batch_text in fast_loader:
+            # Move precomputed batch directly to GPU using its cached datatype
+            batch_clap = batch_clap.to(device)
+            batch_text = batch_text.to(device)
             
             optimizer.zero_grad(set_to_none=True)
 
-            # Conditional AMP
-            amp_device = device.type
-            amp_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-            
-            with torch.amp.autocast(device_type=amp_device, dtype=amp_dtype):
-                # Pass directly through our untended projection head
-                raw_audio_embeds = proj_head(batch_clap.float())
+            # Pass directly through our untended projection head
+            raw_audio_embeds = proj_head(batch_clap.float())
 
-                # CRITICAL FIX: L2 Normalize to ensure true Cosine Similarity for InfoNCE
-                audio_embeds = F.normalize(raw_audio_embeds, p=2, dim=-1)
-                batch_text = F.normalize(batch_text, p=2, dim=-1)
+            # CRITICAL: L2 Normalize and safely cast to float32 to ensure true Cosine Similarity for InfoNCE
+            audio_embeds = F.normalize(raw_audio_embeds, p=2, dim=-1).float()
+            batch_text = F.normalize(batch_text, p=2, dim=-1).float()
 
-                # Contrastive Loss (InfoNCE)
-                scale = torch.clamp(logit_scale.exp(), max=100.0)
-                logits_per_audio = scale * audio_embeds @ batch_text.t()
-                logits_per_text = logits_per_audio.t()
+            # Contrastive Loss (InfoNCE)
+            scale = torch.clamp(logit_scale.exp(), max=100.0)
+            logits_per_audio = scale * audio_embeds @ batch_text.t()
+            logits_per_text = logits_per_audio.t()
 
-                labels = torch.arange(len(audio_embeds), device=device)
-                loss_a = F.cross_entropy(logits_per_audio, labels)
-                loss_t = F.cross_entropy(logits_per_text, labels)
-                loss = (loss_a + loss_t) / 2.0
+            labels = torch.arange(len(audio_embeds), device=device)
+            loss_a = F.cross_entropy(logits_per_audio, labels)
+            loss_t = F.cross_entropy(logits_per_text, labels)
+            loss = (loss_a + loss_t) / 2.0
 
             loss.backward()
             optimizer.step()
 
             epoch_loss += loss.item()
-            pbar.set_postfix(loss=f"{loss.item():.4f}", temp=f"{scale.item():.2f}")
 
         avg_loss = epoch_loss / len(fast_loader)
         print(f"\n==== Epoch {epoch + 1} Summary ====")
@@ -252,5 +248,26 @@ def train():
         
         print(f"-> Saved robust Checkpoints to {CHECKPOINT_DIR}\n")
 
+
+def run_pipeline():
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+        
+    print(f"Using compute device: {device}")
+    
+    # 1. Parse and extract validated dataset mapping (CPU bound)
+    dataset = load_dataset()
+    
+    # 2. Extract arrays and wipe foundational memory limits (Heavy inference mapping)
+    tensor_clap, tensor_text, proj_head = precompute_embeddings(dataset, device)
+    
+    # 3. High Velocity gradient matching (Lightweight loop computing)
+    train_projection_head(tensor_clap, tensor_text, proj_head, device)
+
+
 if __name__ == "__main__":
-    train()
+    run_pipeline()

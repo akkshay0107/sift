@@ -24,6 +24,12 @@ def test_text_embedding_shape_and_similarity(embedder):
     assert isinstance(emb1, torch.Tensor)
     assert emb1.shape == (1, 2048)
 
+    # 1b. Debug/Stability Checks (Ensure float16 didn't overflow to NaN/Inf)
+    assert not torch.isnan(emb1).any().item(), "Qwen text embedding contains NaNs (likely float16 overflow)"
+    assert not torch.isinf(emb1).any().item(), "Qwen text embedding contains Infs"
+    assert not torch.isnan(emb2).any().item(), "Qwen text embedding contains NaNs"
+    assert not torch.isnan(emb3).any().item(), "Qwen text embedding contains NaNs"
+
     # 2. Assert Semantic Validity (L2 normalized similarity)
     sim_similar = (emb1 @ emb2.T).item()
     sim_different = (emb1 @ emb3.T).item()
@@ -42,3 +48,7 @@ def test_image_embedding_shape(embedder, test_png):
 
     assert isinstance(emb_img, torch.Tensor)
     assert emb_img.shape == (1, 2048)
+
+    # 3. Debug/Stability Checks
+    assert not torch.isnan(emb_img).any().item(), "Qwen image embedding contains NaNs"
+    assert not torch.isinf(emb_img).any().item(), "Qwen image embedding contains Infs"

@@ -67,10 +67,21 @@ class QwenEmbedder:
         self,
         model_path: str = _DEFAULT_MODEL_PATH,
         instruction: str = "Represent the user's input.",
-        dtype: torch.dtype = torch.bfloat16,
+        dtype: torch.dtype | None = None,
         max_pixels: int = 512 * 512,  # Limit max pixels to ~260k to prevent CPU exploding on high res
         **kwargs,
     ):
+        if dtype is None:
+            if torch.cuda.is_available():
+                dtype = torch.bfloat16 # CUDA handles bfloat16 natively
+            elif torch.backends.mps.is_available():
+                dtype = torch.float16  # Best performance for Mac
+            else:
+                dtype = torch.float32  # CPU fallback
+        
+        # Decide if we need to manually move the model to MPS
+        move_to_mps = "device_map" not in kwargs and torch.backends.mps.is_available()
+
         self._instruction = instruction
         self._embedder = Qwen3VLEmbedder(
             model_name_or_path=model_path,
@@ -79,6 +90,9 @@ class QwenEmbedder:
             max_pixels=max_pixels,
             **kwargs,
         )
+        
+        if move_to_mps:
+            self._embedder.model.to("mps")
 
     # ------------------------------------------------------------------
     # Public API
