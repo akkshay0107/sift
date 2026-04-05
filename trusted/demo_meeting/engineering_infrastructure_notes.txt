@@ -1,0 +1,9 @@
+# Q3 Infrastructure Sync
+
+**Date:** Oct 5th
+**Attendees:** Sam (VP Engineering), Priya (Cloud Architect)
+
+## Focus: Cost Optimization Follow-up
+- The CFO highlighted in the main Q3 Review that our gross margins rose to 78%. This is largely due to our recent migration off legacy databases to our in-house distributed solution.
+- **Action Item:** Priya to audit the rogue development clusters. We suspect we can squeeze another 2% in margin next quarter if we auto-terminate idle dev environments.
+- **SaaS Tier Scaling:** The new enterprise tier is handling 5x the traffic we expected, which drove the revenue beat. We need to horizontally scale the compute nodes before the Q4 holiday rush to maintain stability.

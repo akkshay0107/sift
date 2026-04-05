@@ -17,18 +17,18 @@ export PYTHONUNBUFFERED=1
 export CSV_PATH="$RCAC_SCRATCH/engine/data/AudioSetCaps_caption_subset.csv"
 
 export PRECOMPUTE_BATCH_SIZE=16
-export BATCH_SIZE=2048
+export BATCH_SIZE=256
 
-# Keep high epochs
-export EPOCHS=500
+# Transferred to 60 epochs for 2 full cycles with early stopping
+export EPOCHS=30
 
 # ---------------------------------------------------------
 # REGULARIZATION TWEAKS (COMBATING OVERFITTING)
 # ---------------------------------------------------------
-# 1. Lower LR to let the model settle gracefully
-export LR=3e-4
+# 1. Lower LR to let the model settle gracefully (1e-4 for smaller batches)
+export LR=5e-5
 
-export WEIGHT_DECAY=0.05
+export WEIGHT_DECAY=0.15
 
 # 3. Increase learning rate warmup/decay stability via Gradient Clipping
 export GRAD_CLIP_NORM=0.5

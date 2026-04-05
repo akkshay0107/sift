@@ -44,15 +44,19 @@ class ProjectionHead(nn.Module):
     def __init__(
         self,
         in_dim: int = CLAP_AUDIO_DIM,
-        hidden_dim: int = 1024,
+        hidden_dim: int = 2048,
         out_dim: int = QWEN_EMBED_DIM,
-        dropout: float = 0.0,
+        dropout: float = 0.1,
     ) -> None:
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
-            nn.GELU(),
             nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, out_dim),
         )
@@ -65,10 +69,9 @@ class ProjectionHead(nn.Module):
 
         Returns
         -------
-        torch.Tensor, shape [B, out_dim], L2-normalized
+        torch.Tensor, shape [B, out_dim]
         """
-        projected = self.net(x)
-        return F.normalize(projected, p=2, dim=-1)
+        return self.net(x)
 
 
 class AudioEmbedder:
@@ -189,6 +192,7 @@ class AudioEmbedder:
             clap_embed = self._audio_projection(pooled)  # [B, 512]
             clap_embed = F.normalize(clap_embed, p=2, dim=-1)
             projected = self._projection(clap_embed.float())  # [B, 2048]
+            projected = F.normalize(projected, p=2, dim=-1)
 
         return projected.cpu()
 

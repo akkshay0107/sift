@@ -13,7 +13,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from src.embed.audio import AudioEmbedder, ProjectionHead
@@ -286,8 +286,17 @@ def train_projection_head(
     )
 
     proj_head = proj_head.to(device).float()
+
+    # Initialize projection head with Xavier uniform
+    for m in proj_head.modules():
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+
     proj_head.train()
 
+    # RESTORED LEARNABLE TEMPERATURE (Starting at 0.07)
     default_temp = 0.07
     logit_scale = nn.Parameter(
         torch.tensor(math.log(1.0 / default_temp), device=device, dtype=torch.float32)
@@ -300,15 +309,18 @@ def train_projection_head(
         weight_decay=WEIGHT_DECAY,
     )
 
-    scheduler = CosineAnnealingLR(
+    scheduler = CosineAnnealingWarmRestarts(
         optimizer,
-        T_max=max(1, EPOCHS // 3),
-        eta_min=0.0,
+        T_0=20,
+        T_mult=1,
+        eta_min=1e-6,
     )
 
     start_epoch = 0
     global_step = 0
     best_val_loss = float("inf")
+    patience = 10
+    epochs_no_improve = 0
 
     latest_path = Path(CHECKPOINT_DIR) / "latest.pt"
     best_path = Path(CHECKPOINT_DIR) / "best.pt"
@@ -323,13 +335,16 @@ def train_projection_head(
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
         with torch.no_grad():
-            logit_scale.copy_(checkpoint["logit_scale"].to(device))
+            if "logit_scale" in checkpoint:
+                if isinstance(checkpoint["logit_scale"], torch.Tensor):
+                    logit_scale.copy_(checkpoint["logit_scale"].to(device))
+                else:
+                    logit_scale.copy_(torch.tensor(checkpoint["logit_scale"], device=device))
+        clamp_logit_scale_(logit_scale, MIN_TEMP, MAX_TEMP)
 
         start_epoch = checkpoint["epoch"] + 1
         global_step = checkpoint.get("global_step", 0)
         best_val_loss = checkpoint.get("best_val_loss", float("inf"))
-
-        clamp_logit_scale_(logit_scale, MIN_TEMP, MAX_TEMP)
         print(f"Successfully resumed at epoch {start_epoch}")
     else:
         print("No prior checkpoint found. Beginning new training run.")
@@ -397,14 +412,20 @@ def train_projection_head(
         ckpt_path = Path(CHECKPOINT_DIR) / f"checkpoint_epoch_{epoch + 1:03d}.pt"
         if (epoch + 1) % 10 == 0:
             torch.save(checkpoint, ckpt_path)
-            
+
         torch.save(checkpoint, latest_path)
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
+            epochs_no_improve = 0
             checkpoint["best_val_loss"] = best_val_loss
             torch.save(checkpoint, best_path)
             print(f"-> New best checkpoint saved: {best_path}")
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print(f"-> Early stopping triggered at epoch {epoch + 1}")
+                break
 
         print(f"-> Saved latest checkpoint to {CHECKPOINT_DIR} (Epoch backups every 10)\n")
 
