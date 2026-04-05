@@ -14,6 +14,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from src.indexer.config import MONITORED_DIRECTORIES
+from src.indexer.file_utils import is_hidden
 from src.indexer.indexer import index_file, index_monitored_directories
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,11 @@ class IndexerEventHandler(FileSystemEventHandler):
 
     def _process_file(self, file_path: str):
         path = Path(file_path)
+
+        for directory in MONITORED_DIRECTORIES:
+            if is_hidden(path, directory):
+                return
+
         try:
             inserted, status = index_file(path)
             if status != "skipped_unchanged":

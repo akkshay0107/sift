@@ -18,3 +18,14 @@ def guess_mime_type(path: Path) -> str | None:
 
 def file_extension(path: Path) -> str:
     return path.suffix.lower()
+
+
+def is_hidden(path: Path, root: Path) -> bool:
+    """
+    Checks if a path or any of its parents (relative to root) are hidden (start with .).
+    """
+    try:
+        relative = path.relative_to(root)
+        return any(part.startswith(".") for part in relative.parts)
+    except ValueError:
+        return path.name.startswith(".")
