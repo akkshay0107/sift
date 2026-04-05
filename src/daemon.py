@@ -28,7 +28,7 @@ def run_main_daemon() -> int:
 
     logger.info("Starting unified daemon UI in hidden mode...")
     try:
-        return launch_desktop_app(show_on_start=False)
+        return launch_desktop_app(show_on_start=True)
     finally:
         logger.info("Stopping filesystem observer...")
         observer.stop()

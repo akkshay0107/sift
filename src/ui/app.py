@@ -583,7 +583,7 @@ class MainWindow(QMainWindow):
         prompt = self.query_input.text().strip()
         if not prompt:
             return
-        if prompt.lower() == "goyslop":
+        if prompt.lower() == "exit!":
             QApplication.quit()
             return
 
