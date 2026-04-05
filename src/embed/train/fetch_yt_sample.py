@@ -50,7 +50,7 @@ def fetch_audio(youtube_id, start_sec, duration, out_file, skip_existing=True, b
         return "fail"
 
 
-def batch_fetch(csv_path, audio_dir, limit=None, skip_existing=True, browser=None, cookies=None):
+def batch_fetch(csv_path, audio_dir, offset=0, limit=None, skip_existing=True, browser=None, cookies=None):
     """
     Batch downloads audio samples from a CSV file.
     """
@@ -70,9 +70,13 @@ def batch_fetch(csv_path, audio_dir, limit=None, skip_existing=True, browser=Non
         print("Error: CSV must contain a 'caption' column.")
         return
 
+    if offset > 0:
+        df = df.iloc[offset:]
+        print(f"Applying offset: Skipping first {offset} rows.")
+
     if limit:
         df = df.head(limit)
-        print(f"Limiting fetch to first {limit} rows.")
+        print(f"Limiting fetch to {limit} rows.")
 
     total = len(df)
     start_time = time.time()
@@ -144,6 +148,9 @@ if __name__ == "__main__":
         help="Directory to save audio files.",
     )
     parser.add_argument(
+        "--offset", type=int, default=0, help="Offset row to start fetching from."
+    )
+    parser.add_argument(
         "--limit", type=int, help="Limit the number of samples to download."
     )
     parser.add_argument(
@@ -175,5 +182,5 @@ if __name__ == "__main__":
         fetch_audio(args.id, 0, 10, out_file, skip_existing=args.skip_existing, browser=args.browser, cookies=args.cookies)
     else:
         batch_fetch(
-            csv_path, audio_dir, limit=args.limit, skip_existing=args.skip_existing, browser=args.browser, cookies=args.cookies
+            csv_path, audio_dir, offset=args.offset, limit=args.limit, skip_existing=args.skip_existing, browser=args.browser, cookies=args.cookies
         )
