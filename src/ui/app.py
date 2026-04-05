@@ -307,6 +307,9 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(80, self._apply_macos_overlay)
 
     def _apply_macos_overlay(self) -> None:
+        if platform.system() != "Darwin":
+            return
+
         try:
             from AppKit import NSApp, NSApplicationActivationPolicyRegular
             import ApplicationServices as AS
