@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ctypes import c_void_p
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -17,8 +18,11 @@ from PySide6.QtCore import (
     Qt,
     QTimer,
     QUrl,
+    QObject,
+    Signal,
 )
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QKeySequence, QShortcut
+from pynput import keyboard
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -54,11 +58,12 @@ GRID_LINE = "#2c2a2a"
 ACCENT_SOFT = "rgba(230, 101, 189, 0.18)"
 ACCENT_FAINT = "rgba(230, 101, 189, 0.10)"
 UI_FONT_FAMILY = "Funnel Display"
-UI_FONT_FILE: str | None = "/home/neel/.local/share/fonts/FunnelDisplay/FunnelDisplay-VariableFont_wght.ttf"
-UI_FONT_FALLBACKS = [
-    "/home/neel/.local/share/fonts/FunnelDisplay/FunnelDisplay-VariableFont_wght.ttf",
-    str(Path.home() / ".local/share/fonts/FunnelDisplay/FunnelDisplay-VariableFont_wght.ttf"),
-]
+UI_FONT_FILE: str | None = str(Path(__file__).parent.parent.parent / "assets" / "fonts" / "FunnelDisplay-VariableFont_wght.ttf")
+UI_FONT_FALLBACKS = []
+
+
+class HotkeySignaler(QObject):
+    triggered = Signal()
 
 
 @dataclass(slots=True)
@@ -241,11 +246,20 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Query Memory")
         self.setWindowFlags(
-            Qt.Window | Qt.FramelessWindowHint
+            Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.resize(1360, 900)
         self.setMinimumSize(1100, 760)
+
+        # Center horizontally native to PySide
+        if QApplication.primaryScreen():
+            screen_geo = QApplication.primaryScreen().geometry()
+            x = (screen_geo.width() - self.width()) // 2
+            self.move(x, self.y())
+
+
+
         self._results: list[SearchResult] = []
         self._bundle_panels: list[MemoryPanel] = []
         self._last_bundle_focus_index = 0
@@ -256,9 +270,67 @@ class MainWindow(QMainWindow):
         self._apply_styles()
 
         close_shortcut = QShortcut(QKeySequence("Esc"), self)
-        close_shortcut.activated.connect(self.close)
+        close_shortcut.activated.connect(self._hide_and_reset)
 
         QTimer.singleShot(0, self.play_intro_animation)
+        self._start_global_hotkey()
+
+    def _hide_and_reset(self) -> None:
+        self.hide()
+        self.query_input.clear()
+
+    def _start_global_hotkey(self) -> None:
+        self._hotkey_signaler = HotkeySignaler()
+        self._hotkey_signaler.triggered.connect(self._toggle_visibility)
+        
+        def on_activate():
+            self._hotkey_signaler.triggered.emit()
+
+        self._listener = keyboard.GlobalHotKeys({
+            '<alt>+<space>': on_activate
+        })
+        self._listener.start()
+
+    def _toggle_visibility(self) -> None:
+        if self.isVisible():
+            self._hide_and_reset()
+        else:
+            self.show()
+            self._apply_macos_overlay()
+            self.query_input.setFocus()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(80, self._apply_macos_overlay)
+
+    def _apply_macos_overlay(self) -> None:
+        try:
+            from AppKit import NSApp, NSApplicationActivationPolicyRegular
+            import ApplicationServices as AS
+
+            # Check trust and warn clearly instead of silently failing
+            trusted = AS.AXIsProcessTrusted()
+            if not trusted:
+                print("WARNING: Process not trusted — window cannot appear above fullscreen apps.")
+                print("Fix: System Settings → Privacy & Security → Accessibility → add Terminal")
+            
+            # Promote the process to a foreground app so macOS lets it
+            # take focus from fullscreen apps. Without this, on Sonoma,
+            # a bare Python process is treated as background-only and
+            # cannot receive focus regardless of window level.
+            NSApp.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+
+            for ns_win in NSApp.windows():
+                # canJoinAllSpaces (1) | NSWindowCollectionBehaviorStationary (16)
+                # | fullScreenAuxiliary (256) = 273
+                ns_win.setCollectionBehavior_(1 | 16 | 256)
+                ns_win.setLevel_(1000)
+                ns_win.makeKeyAndOrderFront_(None)
+                ns_win.orderFrontRegardless()
+                
+            NSApp.activateIgnoringOtherApps_(True)
+        except Exception as e:
+            print(f'OVERLAY ERROR: {e}')
 
     def _build_ui(self) -> None:
         root = GridBackgroundWidget()
@@ -504,6 +576,9 @@ class MainWindow(QMainWindow):
     def run_search(self) -> None:
         prompt = self.query_input.text().strip()
         if not prompt:
+            return
+        if prompt.lower() == "goyslop":
+            QApplication.quit()
             return
 
         try:
@@ -911,5 +986,5 @@ class MainWindow(QMainWindow):
 def launch_desktop_app() -> int:
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
-    window.showFullScreen()
+    window.show()
     return app.exec()
