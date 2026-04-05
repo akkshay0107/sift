@@ -1,0 +1,13 @@
+# Q3 Financial Review Meeting Notes
+
+**Date:** Q3 Review
+**Attendees:** Sanjay (CEO), Neel (CFO)
+
+## Key Highlights:
+1. **Revenue Growth:** Q3 revenue reached a record $42M, a 15% increase YoY. The main driver was the launch of the new enterprise SaaS tier.
+2. **Gross Margins:** Improved to 78% due to ongoing cloud infrastructure optimizations.
+3. **Customer Acquisition Cost (CAC):** Decreased by 12%. August marketing initiatives showed high capital efficiency.
+
+## Next Steps / Action Items:
+- **Sales & Marketing:** Capitalize on the strong Q4 pipeline to maintain momentum.
+- **Engineering:** Continue scaling the enterprise SaaS tier to support Q4 volume expectations.

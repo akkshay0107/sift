@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 from src.indexer.config import MONITORED_DIRECTORIES
@@ -91,24 +92,29 @@ def index_monitored_directories() -> None:
 
         logger.info("Indexing directory: %s", directory)
 
-        for path in directory.rglob("*"):
-            if not path.is_file():
-                continue
+        for root, dirs, files in os.walk(directory):
+            # Prune hidden directories in-place to avoid recursion.
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
 
-            total_files += 1
+            for file in files:
+                if file.startswith("."):
+                    continue
 
-            try:
-                inserted, status = index_file(path)
+                path = Path(root) / file
+                total_files += 1
 
-                if status == "skipped_unchanged":
-                    skipped_files += 1
-                    logger.debug("Skipped %s -> unchanged", path)
-                else:
-                    total_records += inserted
-                    logger.info("Indexed %s -> %d record(s)", path, inserted)
+                try:
+                    inserted, status = index_file(path)
 
-            except Exception as e:
-                logger.error("Failed indexing %s: %s", path, e)
+                    if status == "skipped_unchanged":
+                        skipped_files += 1
+                        logger.debug("Skipped %s -> unchanged", path)
+                    else:
+                        total_records += inserted
+                        logger.info("Indexed %s -> %d record(s)", path, inserted)
+
+                except Exception as e:
+                    logger.error("Failed indexing %s: %s", path, e)
 
     logger.info(
         "Done. Total files scanned: %d, records inserted: %d, files skipped: %d",
