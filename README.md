@@ -1,8 +1,10 @@
-# Sift: Multimodal Memory Engine
+# Sift: Local Semantic Search Engine
 
-Sift is a high-performance local embedding and retrieval engine designed for instant multimodal semantic search across text, images, audio, and video. It operates as a personal memory layer, providing zero-friction access to indexed data through a unified vector space.
+<p align="center">
+  <img src="assets/logo.png" alt="Sift Logo" width="400">
+</p>
 
-![Sift Logo](assets/logo.png)
+Sift is a high-performance local embedding and retrieval engine designed for instant multimodal semantic search across text, images, audio, and video.
 
 ---
 
@@ -13,22 +15,27 @@ Sift is a high-performance local embedding and retrieval engine designed for ins
 The backbone of Sift is **Qwen3-VL-Embedding-2B**, which natively handles text, images, and video.
 
 - **Unified Vector Space**: All modalities are mapped into a shared 2048-dimensional space.
-- **Normalization**: All output vectors are L2-normalized float32 representations.
-- **Backbone**: Leverages specialized vision-text transformer blocks for deep semantic understanding.
 
 ### 2. Audio Bridge (CLAP + Projection)
 
 Unified search for audio is achieved through a CLAP-to-Qwen adapter:
 
 - **Audio Backbone**: `laion/clap-htsat-unfused` (frozen).
-- **Projection Head**: A learned 2-layer MLP (512 -> 1024 -> 2048) that aligns CLAP's audio embeddings with Qwen's vision-text space.
-- **Training**: Optimized using Contrastive InfoNCE loss on the AudioSetCaps dataset to bridge the gap between audio features and textual/visual concepts.
+- **Projection Head**: A learned 2-layer MLP (512 -> 2048) that aligns CLAP's audio embeddings with Qwen's vision-text space.
+- **Training**: Optimized using Contrastive InfoNCE loss on the AudioSetCaps dataset to relate audio features and textual/visual concepts.
 
 ### 3. Processing Pipelines
 
 - **OCR Chain**: Uses EasyOCR to extract text from images, which is then embedded via Qwen for semantic search.
-- **Transcription Chain**: Uses Faster-Whisper (large-v3) to generate transcripts from audio, which are also embedded via Qwen to provide text-based retrieval of audio segments.
-- **Metadata Chain**: Generates text-based metadata summaries (filename, extension, modality, and timestamps) for every file to ensure discoverability even without deep content-based matches.
+- **Transcription Chain**: Uses Faster-Whisper to generate transcripts from audio, which are also embedded via Qwen to provide text-based retrieval of audio segments.
+
+### 4. Watchdog Daemon
+
+Sift includes a real-time filesystem monitor based on the `watchdog` library. It automatically detects new, modified, or moved files within your monitored directories and indexes them instantly.
+
+- **Initial Scan**: On startup, the daemon performs a full scan to catch any changes that occurred while it was offline.
+- **Event-Driven**: Uses OS-level file system events (via `inotify` on Linux, `FSEvents` on macOS) for efficient, low-overhead monitoring.
+- **Hidden File Filtering**: Automatically ignores hidden files and directories (e.g., those starting with `.`).
 
 ---
 
@@ -47,7 +54,44 @@ Sift uses an incremental indexing strategy to minimize redundant processing and 
 
 - **Multimodal Retrieval**: Search by natural language to find related text, images, audio recordings, or video clips in a single query.
 - **Result Bundling**: Groups similar snippets or related files using a hybrid scoring system that considers embedding similarity, temporal proximity, and filename Jaccard similarity.
-- **Score Thresholding**: Configurable thresholds allow for filtering low-relevance matches to maintain high precision in large datasets.
+
+---
+
+## Configuration
+
+Sift is configured via a `config.json` file located in your user's configuration directory:
+
+- **Linux**: `~/.config/sift/config.json`
+- **macOS**: `~/Library/Application Support/sift/config.json`
+- **Windows**: `%APPDATA%\sift\config.json`
+
+### Monitored Directories
+
+You can specify which folders Sift should index by modifying the `monitored_directories` list in your `config.json`:
+
+```json
+{
+  "monitored_directories": [
+    "/home/user/Documents",
+    "/home/user/Pictures",
+    "/home/user/Videos/clips"
+  ]
+}
+```
+
+By default, Sift will create this file and point it to a `trusted/` folder within the project directory if no configuration exists. (for simple tests)
+
+---
+
+## Project Structure
+
+- `src/daemon.py`: The unified entry point that preloads models, starts the indexer, and launches the UI.
+- `src/indexer/`: Core indexing logic, file routing, and database interaction.
+- `src/embed/`: Multimodal embedding pipelines (Qwen3-VL, CLAP, Whisper).
+- `src/search/`: Similarity search engine and result bundling logic.
+- `src/ui/`: PySide6-based desktop application.
+- `models/`: Storage for pre-trained model weights.
+- `tests/`: Comprehensive test suite for pipelines and components.
 
 ---
 
@@ -55,8 +99,22 @@ Sift uses an incremental indexing strategy to minimize redundant processing and 
 
 The project includes a futuristic, minimalist desktop application built with PySide6:
 
+<p align="center">
+  <img src="assets/searchbar.jpeg" alt="Sift Search Bar" width="800">
+</p>
+
 - **Bundle-Centric Results**: Search results are grouped into up to three top-ranked bundles plus a recognized-entities list.
-- **Keyboard-First Design**: Optimized for rapid use with shortcuts like `Esc` to close and `Enter` to execute queries.
+
+<p align="center">
+  <img src="assets/searchresult.jpeg" alt="Sift Search Results" width="800">
+</p>
+
+### Keyboard Shortcuts
+
+- **`Alt + Space`**: Toggle the search bar visibility (Global shortcut).
+- **`Esc`**: Hide the search bar and clear the current query.
+- **`Enter`**: Execute a search or open the currently selected file.
+- **`Arrow Keys`**: Navigate through result bundles and file lists.
 
 ---
 
@@ -169,26 +227,8 @@ uv run python main.py --cli
 
 ---
 
-## Training on RCAC Gautschi
-
-Sift includes specialized scripts for training and extending the audio alignment layer on high-performance computing clusters:
+## Training scripts (RCAC cluster specific)
 
 1.  **Prepare Subset**: `uv run python -m src.embed.train.prepare_subset` (Prepares training data).
 2.  **Fetch Audio**: `uv run python -m src.embed.train.fetch_yt_sample` (Downloads training samples).
 3.  **Train Loop**: `uv run python -m src.embed.train.train_loop` (Starts the alignment training).
-4.  **Checkpointing**: Training automatically saves to `latest.pt` and supports seamless resumption after preemption.
-
----
-
-## Project Structure
-
-```
-src/
-  embed/        # Model wrappers (Qwen, CLAP, Whisper, EasyOCR)
-  indexer/      # File monitoring, hashing, and Qdrant logic
-  search/       # Retrieval, ranking, and temporal bundling logic
-  ui/           # PySide6 desktop application implementation
-trusted/        # Default user data directory for indexing
-models/         # Local directory for model weights and checkpoints
-notes/          # Technical specifications, schemas, and runbooks
-```

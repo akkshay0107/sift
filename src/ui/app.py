@@ -1,27 +1,32 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import platform
 import shutil
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
+from pynput import keyboard
 from PySide6.QtCore import (
     QEasingCurve,
     QItemSelectionModel,
+    QObject,
     QParallelAnimationGroup,
     QPropertyAnimation,
     QRect,
-    QRectF,
     Qt,
     QTimer,
-    QObject,
     Signal,
 )
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QPainterPath, QRegion, QShortcut
-from pynput import keyboard
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontDatabase,
+    QKeySequence,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -40,9 +45,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.search.bundler import SearchBundle, build_bundles
 from src.search import SearchResult, search_similar
-
+from src.search.bundler import SearchBundle, build_bundles
 
 # Dev-facing theme knob.
 ACCENT_COLOR = "#5a8fd6"
@@ -122,7 +126,6 @@ class MemoryPanel(QFrame):
         self.footer_label.setObjectName("panelFooter")
         layout.addWidget(self.footer_label)
 
-
     def set_items(self, items: list[str], *, highlight_index: int = 0) -> None:
         self.list_widget.clear()
         for value in items:
@@ -168,9 +171,7 @@ class MemoryPanel(QFrame):
             self.list_widget.setCurrentRow(0, QItemSelectionModel.ClearAndSelect)
 
         file_count = len(seen)
-        self.footer_label.setText(
-            f"{file_count} file{'s' if file_count != 1 else ''}"
-        )
+        self.footer_label.setText(f"{file_count} file{'s' if file_count != 1 else ''}")
 
     def _handle_item_clicked(self, item: QListWidgetItem) -> None:
         if self._open_handler is None:
@@ -312,6 +313,7 @@ class MainWindow(QMainWindow):
                 self.play_results_animation()
             self._apply_macos_overlay()
             self.query_input.setFocus()
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         QTimer.singleShot(80, self._apply_macos_overlay)
@@ -321,8 +323,8 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            from AppKit import NSApp, NSApplicationActivationPolicyRegular
             import ApplicationServices as AS
+            from AppKit import NSApp, NSApplicationActivationPolicyRegular
 
             # Check trust and warn clearly instead of silently failing
             trusted = AS.AXIsProcessTrusted()

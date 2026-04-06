@@ -17,8 +17,8 @@ Usage:
     similarity = (text_emb @ image_emb.T).item()
 """
 
-import sys
 import os
+import sys
 from pathlib import Path
 from threading import RLock
 from typing import Union

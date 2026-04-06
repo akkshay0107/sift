@@ -4,7 +4,6 @@ import sys
 
 from src.search import FileSearchResult, search_similar_files
 
-
 DEFAULT_K = 8
 DEFAULT_SCORE_THRESHOLD = 0.2
 

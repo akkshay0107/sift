@@ -1,6 +1,6 @@
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-import re
 from typing import Any
 
 import numpy as np

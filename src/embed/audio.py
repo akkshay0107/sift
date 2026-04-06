@@ -1,8 +1,8 @@
+import os
 from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

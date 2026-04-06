@@ -18,6 +18,8 @@ models/
 
 .DS_Store
 
+.ruff_cache
+
 qdrant_storage/
 data/
 scratch/

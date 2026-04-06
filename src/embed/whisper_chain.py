@@ -110,9 +110,7 @@ class WhisperChain:
 
         # 2. Batch Text Embedding
         texts = [s.transcript if s.transcript else "" for s in segments]
-        embeddings = self.qwen_embedder.embed_batch(
-            texts, instruction=instruction
-        )  # type: ignore
+        embeddings = self.qwen_embedder.embed_batch(texts, instruction=instruction)  # type: ignore
 
         for i, segment in enumerate(segments):
             segment.text_embedding = embeddings[i]
