@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import sys
 
 from src.search import FileSearchResult, search_similar_files
