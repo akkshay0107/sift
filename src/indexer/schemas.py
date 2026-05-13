@@ -3,7 +3,7 @@ from typing import Any
 from uuid import uuid4
 
 
-@dataclass
+@dataclass(slots=True)
 class EmbeddingRecord:
     id: str
     vector: list[float]

@@ -14,13 +14,13 @@ class SearchResult:
     vector: list[float] | dict[str, list[float]] | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class SearchBundle:
     bundle_id: str
     title: str
     score: float
-    views: list[SearchResult]
-    source_files: list[str]
+    views: list[SearchResult] = field(default_factory=list)
+    source_files: list[str] = field(default_factory=list)
     explanation: str
     centroid: list[float] = field(default_factory=list)
 

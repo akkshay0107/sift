@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from transformers import ClapModel, ClapProcessor
 
 
-@dataclass
+@dataclass(slots=True)
 class AudioSegment:
     data: np.ndarray
     sample_rate: int

@@ -6,7 +6,8 @@ from pathlib import Path
 def compute_file_hash(path: Path) -> str:
     hasher = hashlib.sha256()
     with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
+        # larger chunk size to reduce sys calls for larger files
+        for chunk in iter(lambda: f.read(65536), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
 

@@ -26,11 +26,12 @@ from typing import Union
 import torch
 from PIL import Image
 
-# ---------------------------------------------------------------------------
 # Make the model's own scripts/ directory importable so we can use the
 # official Qwen3VLEmbedder class without copying it.
-# ---------------------------------------------------------------------------
 _MODEL_DIR = Path(__file__).parents[2] / "models" / "Qwen3-VL-Embedding-2B"
+# Default model path — resolved relative to the project root so it works
+# regardless of where the script is invoked from.
+_DEFAULT_MODEL_PATH = str(_MODEL_DIR)
 _SCRIPTS_DIR = _MODEL_DIR / "scripts"
 
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -38,11 +39,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from qwen3_vl_embedding import Qwen3VLEmbedder  # noqa: E402  (lives in model scripts/)
 
-# ---------------------------------------------------------------------------
-# Default model path — resolved relative to the project root so it works
-# regardless of where the script is invoked from.
-# ---------------------------------------------------------------------------
-_DEFAULT_MODEL_PATH = str(_MODEL_DIR)
+_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
 
 class QwenEmbedder:
@@ -179,17 +176,15 @@ class QwenEmbedder:
 
             if is_path:
                 suffix = Path(input).suffix.lower()
-                video_exts = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
-                if suffix in video_exts:
+                if suffix in _VIDEO_EXTS:
                     item["video"] = input
                 else:
                     item["image"] = input
             elif is_url:
                 lower = input.lower()
-                video_exts = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v")
 
-                if lower.endswith(video_exts):
+                if lower.endswith(tuple(_VIDEO_EXTS)):
                     item["video"] = input
                 else:
                     item["image"] = input

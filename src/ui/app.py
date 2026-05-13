@@ -126,7 +126,7 @@ class MemoryPanel(QFrame):
         self.footer_label.setObjectName("panelFooter")
         layout.addWidget(self.footer_label)
 
-    def set_items(self, items: list[str], *, highlight_index: int = 0) -> None:
+    def set_items(self, items: list[str]) -> None:
         self.list_widget.clear()
         for value in items:
             item = QListWidgetItem(value)
@@ -256,6 +256,162 @@ class EntityList(QFrame):
         source_path = item.data(Qt.UserRole)
         if isinstance(source_path, str) and source_path:
             self._open_handler(source_path)
+
+
+_STYLESHEET = """
+QMainWindow {
+    background: transparent;
+    font-family: "{font_family}";
+}
+#shell {
+    background: transparent;
+    border: none;
+}
+#header {
+    background: #0d0d0d;
+    border: 1.5px solid {BOUNDARY_COLOR};
+    border-top: none;
+    border-top-left-radius: 0px;
+    border-top-right-radius: 0px;
+    border-bottom-left-radius: 16px;
+    border-bottom-right-radius: 16px;
+}
+#searchIcon {
+    color: {ACCENT_COLOR};
+    font-family: "{font_family}";
+    font-size: 26px;
+    font-weight: 600;
+}
+#queryInput {
+    background: transparent;
+    border: none;
+    color: {TEXT_PRIMARY};
+    font-family: "{font_family}";
+    font-size: 22px;
+    font-weight: 400;
+    padding: 6px 8px 6px 0;
+}
+#queryInput::placeholder {
+    color: {TEXT_MUTED};
+    font-family: "{font_family}";
+}
+#cancelLabel {
+    color: #3d3d3d;
+    font-family: "{font_family}";
+    font-size: 13px;
+    letter-spacing: 1px;
+}
+#topPanels {
+    background: transparent;
+    border: none;
+}
+#memoryPanel {
+    background: #0f0f0f;
+    border: 1.5px solid {BOUNDARY_COLOR};
+    border-radius: 14px;
+}
+#entityPanel {
+    background: #0f0f0f;
+    border: 1.5px solid {BOUNDARY_COLOR};
+    border-radius: 14px;
+}
+#panelTitle {
+    color: {TEXT_MUTED};
+    font-family: "{font_family}";
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 2px;
+}
+#panelList {
+    background: transparent;
+    color: {TEXT_PRIMARY};
+    font-family: "{font_family}";
+    font-size: 14px;
+    outline: none;
+    border-radius: 0px;
+}
+#panelList::item {
+    padding: 7px 4px;
+    border: none;
+    border-radius: 6px;
+}
+#panelList::item:selected {
+    background: {ACCENT_FAINT};
+    color: {ACCENT_COLOR};
+}
+#panelList::item:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+QScrollBar:vertical {
+    background: transparent;
+    width: 6px;
+    margin: 2px 1px 2px 1px;
+}
+QScrollBar::handle:vertical {
+    background: rgba(90, 143, 214, 0.4);
+    min-height: 24px;
+    border-radius: 3px;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+#panelFooter {
+    color: {TEXT_MUTED};
+    font-family: "{font_family}";
+    font-size: 12px;
+    font-weight: 500;
+    border-top: 1px solid #222222;
+    padding-top: 8px;
+}
+#entityHeader {
+    background: #0d0d0d;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    border-bottom: 1px solid #1e1e1e;
+}
+#entityHeaderTitle {
+    color: {TEXT_PRIMARY};
+    font-family: "{font_family}";
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+#entityHeaderFilter {
+    color: {TEXT_MUTED};
+    font-family: "{font_family}";
+    font-size: 12px;
+}
+#entityList {
+    background: transparent;
+    color: {TEXT_PRIMARY};
+    font-family: "{font_family}";
+    font-size: 14px;
+    outline: none;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+#entityList::item {
+    padding: 12px 14px;
+    border-bottom: 1px solid #1a1a1a;
+    border-radius: 0px;
+}
+#entityList::item:selected {
+    background: {ACCENT_FAINT};
+    color: {ACCENT_COLOR};
+}
+#entityList::item:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+#entityFooter {
+    background: #0f0f0f;
+    border-top: 1px solid #1e1e1e;
+    border-bottom-left-radius: 14px;
+    border-bottom-right-radius: 14px;
+}
+"""
 
 
 class MainWindow(QMainWindow):
@@ -457,160 +613,14 @@ class MainWindow(QMainWindow):
         QApplication.instance().setFont(font)
 
         self.setStyleSheet(
-            f"""
-            QMainWindow {{
-                background: transparent;
-                font-family: "{font_family}";
-            }}
-            #shell {{
-                background: transparent;
-                border: none;
-            }}
-            #header {{
-                background: #0d0d0d;
-                border: 1.5px solid {BOUNDARY_COLOR};
-                border-top: none;
-                border-top-left-radius: 0px;
-                border-top-right-radius: 0px;
-                border-bottom-left-radius: 16px;
-                border-bottom-right-radius: 16px;
-            }}
-            #searchIcon {{
-                color: {ACCENT_COLOR};
-                font-family: "{font_family}";
-                font-size: 26px;
-                font-weight: 600;
-            }}
-            #queryInput {{
-                background: transparent;
-                border: none;
-                color: {TEXT_PRIMARY};
-                font-family: "{font_family}";
-                font-size: 22px;
-                font-weight: 400;
-                padding: 6px 8px 6px 0;
-            }}
-            #queryInput::placeholder {{
-                color: {TEXT_MUTED};
-                font-family: "{font_family}";
-            }}
-            #cancelLabel {{
-                color: #3d3d3d;
-                font-family: "{font_family}";
-                font-size: 13px;
-                letter-spacing: 1px;
-            }}
-            #topPanels {{
-                background: transparent;
-                border: none;
-            }}
-            #memoryPanel {{
-                background: #0f0f0f;
-                border: 1.5px solid {BOUNDARY_COLOR};
-                border-radius: 14px;
-            }}
-            #entityPanel {{
-                background: #0f0f0f;
-                border: 1.5px solid {BOUNDARY_COLOR};
-                border-radius: 14px;
-            }}
-            #panelTitle {{
-                color: {TEXT_MUTED};
-                font-family: "{font_family}";
-                font-size: 11px;
-                font-weight: 600;
-                letter-spacing: 2px;
-            }}
-            #panelList {{
-                background: transparent;
-                color: {TEXT_PRIMARY};
-                font-family: "{font_family}";
-                font-size: 14px;
-                outline: none;
-                border-radius: 0px;
-            }}
-            #panelList::item {{
-                padding: 7px 4px;
-                border: none;
-                border-radius: 6px;
-            }}
-            #panelList::item:selected {{
-                background: {ACCENT_FAINT};
-                color: {ACCENT_COLOR};
-            }}
-            #panelList::item:hover {{
-                background: rgba(255, 255, 255, 0.03);
-            }}
-            QScrollBar:vertical {{
-                background: transparent;
-                width: 6px;
-                margin: 2px 1px 2px 1px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: rgba(90, 143, 214, 0.4);
-                min-height: 24px;
-                border-radius: 3px;
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
-                background: transparent;
-            }}
-            #panelFooter {{
-                color: {TEXT_MUTED};
-                font-family: "{font_family}";
-                font-size: 12px;
-                font-weight: 500;
-                border-top: 1px solid #222222;
-                padding-top: 8px;
-            }}
-            #entityHeader {{
-                background: #0d0d0d;
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
-                border-bottom: 1px solid #1e1e1e;
-            }}
-            #entityHeaderTitle {{
-                color: {TEXT_PRIMARY};
-                font-family: "{font_family}";
-                font-size: 13px;
-                font-weight: 600;
-                letter-spacing: 0.5px;
-            }}
-            #entityHeaderFilter {{
-                color: {TEXT_MUTED};
-                font-family: "{font_family}";
-                font-size: 12px;
-            }}
-            #entityList {{
-                background: transparent;
-                color: {TEXT_PRIMARY};
-                font-family: "{font_family}";
-                font-size: 14px;
-                outline: none;
-                border-bottom-left-radius: 12px;
-                border-bottom-right-radius: 12px;
-            }}
-            #entityList::item {{
-                padding: 12px 14px;
-                border-bottom: 1px solid #1a1a1a;
-                border-radius: 0px;
-            }}
-            #entityList::item:selected {{
-                background: {ACCENT_FAINT};
-                color: {ACCENT_COLOR};
-            }}
-            #entityList::item:hover {{
-                background: rgba(255, 255, 255, 0.03);
-            }}
-            #entityFooter {{
-                background: #0f0f0f;
-                border-top: 1px solid #1e1e1e;
-                border-bottom-left-radius: 14px;
-                border-bottom-right-radius: 14px;
-            }}
-            """
+            _STYLESHEET.format(
+                font_family=font_family,
+                BOUNDARY_COLOR=BOUNDARY_COLOR,
+                ACCENT_COLOR=ACCENT_COLOR,
+                TEXT_PRIMARY=TEXT_PRIMARY,
+                TEXT_MUTED=TEXT_MUTED,
+                ACCENT_FAINT=ACCENT_FAINT,
+            )
         )
 
     def run_search(self) -> None:
